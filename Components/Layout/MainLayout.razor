@@ -1,0 +1,49 @@
+@inherits LayoutComponentBase
+@inject IJSRuntime JS
+
+<div class="d-flex flex-column min-vh-100">
+
+    <!-- ── Ultra-clean Navbar ─────────────────────────────── -->
+    <nav class="app-navbar">
+        <!-- Brand -->
+        <a href="/" class="nav-brand">
+            <div class="nav-brand-icon">
+                <i class="bi bi-database-fill-gear"></i>
+            </div>
+            <span class="nav-brand-text">
+                DataDictionary<em>Studio</em>
+            </span>
+        </a>
+
+        <div class="nav-divider"></div>
+
+        <!-- DB connection status (populated from JS or state) -->
+        <div class="nav-db-status">
+            <span class="nav-db-dot idle" id="nav-db-dot"></span>
+            <span id="nav-db-label" class="nav-db-name" style="color: var(--clr-text-subtle); font-weight: 400;">
+                Sin conexión
+            </span>
+        </div>
+
+        <div class="nav-spacer"></div>
+
+        <!-- Right side: subtle metadata only -->
+        <div class="d-none d-md-flex align-items-center gap-3" style="font-size: 0.76rem; color: var(--clr-text-subtle);">
+            <span>.NET 10 &nbsp;·&nbsp; SQL Server 2016 – 2022+</span>
+        </div>
+    </nav>
+
+    <!-- ── Main Content ──────────────────────────────────── -->
+    <main class="flex-grow-1">
+        @Body
+    </main>
+
+    <!-- ── Minimal Footer ────────────────────────────────── -->
+    <footer class="app-footer">
+        <span>SQL Server Data Dictionary Studio &copy; @DateTime.Now.Year</span>
+        <span style="font-size: 0.72rem;">
+            OpenXML SDK 3.5 &nbsp;·&nbsp; READ UNCOMMITTED isolation &nbsp;·&nbsp; .NET 10 Blazor Server
+        </span>
+    </footer>
+
+</div>

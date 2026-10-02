@@ -1,0 +1,2318 @@
+@page "/"
+@rendermode InteractiveServer
+@inject DatabaseDiscoveryService DiscoveryService
+@inject MetadataExtractionService ExtractionService
+@inject WordDictionaryService WordService
+@inject IntelligentMetadataService IntelligentService
+@inject SchemaDriftService DriftService
+@inject DocumentDownloadManager DownloadManager
+@inject IJSRuntime JS
+
+<PageTitle>Data Dictionary Studio · SQL Server</PageTitle>
+
+<!-- ── Hero Header ─────────────────────────────────────────── -->
+<div class="hero-banner">
+    <div class="hero-banner-inner">
+        <div class="d-flex align-items-start justify-content-between gap-3 pb-3 flex-wrap">
+            <div>
+                <div class="d-flex align-items-center gap-2 mb-1 flex-wrap">
+                    <h1 class="hero-title">Data Dictionary Studio</h1>
+                    @if (!string.IsNullOrEmpty(SelectedDatabase))
+                    {
+                        <span class="conn-pill">
+                            <span class="dot"></span>@SelectedDatabase
+                        </span>
+                    }
+                </div>
+                <p class="hero-subtitle">
+                    Auditoría de esquema, asistente inteligente de metadatos, control de versiones y exportación Word para SQL Server.
+                </p>
+            </div>
+        </div>
+
+        <!-- ── Segmented Tab Navigation (underline style) ── -->
+        <div class="tab-nav" style="margin: 0 -1.5rem; padding: 0 1.5rem;">
+            <button class="tab-btn @(ActiveTab == "generator" ? "active" : "")"
+                    @onclick='() => ActiveTab = "generator"'>
+                <i class="bi bi-file-earmark-word"></i>
+                Exportador Word
+            </button>
+            <button class="tab-btn @(ActiveTab == "assistant" ? "active" : "")"
+                    @onclick="SwitchToAssistantTab">
+                <i class="bi bi-magic"></i>
+                Asistente de Metadatos
+            </button>
+            <button class="tab-btn @(ActiveTab == "drift" ? "active" : "")"
+                    @onclick="SwitchToDriftTab">
+                <i class="bi bi-git"></i>
+                Auditoría de Esquema
+                @if (DriftAlerts.Count > 0)
+                {
+                    <span class="tab-badge">@DriftAlerts.Count</span>
+                }
+            </button>
+            <button class="tab-btn @(ActiveTab == "glossary" ? "active" : "")"
+                    @onclick="SwitchToGlossaryTab">
+                <i class="bi bi-journal-bookmark"></i>
+                Glosario Maestro
+            </button>
+        </div>
+    </div>
+</div>
+
+<div class="page-content">
+
+    <!-- Alertas Globales -->
+    @if (!string.IsNullOrEmpty(ErrorMessage))
+    {
+        <div class="alert alert-danger alert-dismissible fade show border-0 shadow-sm mb-4" role="alert">
+            <div class="d-flex align-items-start gap-2">
+                <i class="bi bi-exclamation-octagon-fill fs-5 mt-1"></i>
+                <div class="flex-grow-1">
+                    <strong>Error:</strong> @ErrorMessage
+                </div>
+                <button type="button" class="btn-close" @onclick="() => ErrorMessage = null"></button>
+            </div>
+        </div>
+    }
+    @if (!string.IsNullOrEmpty(SuccessMessage))
+    {
+        <div class="alert alert-success alert-dismissible fade show border-0 shadow-sm mb-4" role="alert">
+            <div class="d-flex align-items-start gap-2">
+                <i class="bi bi-check-circle-fill fs-5 mt-1 text-success"></i>
+                <div class="flex-grow-1">
+                    @SuccessMessage
+                </div>
+                <button type="button" class="btn-close" @onclick="() => SuccessMessage = null"></button>
+            </div>
+        </div>
+    }
+
+    <!-- ========================================================================= -->
+    <!-- PESTAÑA 1: EXPORTADOR WORD (.DOCX) -->
+    <!-- ========================================================================= -->
+    @if (ActiveTab == "generator")
+    {
+        <div class="row g-4">
+            <!-- Columna Izquierda (Paso 1 y Paso 3) -->
+            <div class="col-xl-4 col-lg-5">
+
+                <!-- PASO 1: CONEXIÓN -->
+                <div class="dash-card mb-4">
+                    <div class="dash-card-header d-flex justify-content-between align-items-center">
+                        <div class="d-flex align-items-center gap-2">
+                            <span class="step-indicator">1</span>
+                            <h5 class="fw-bold mb-0" style="color: #1B365D;">Conexión SQL Server</h5>
+                        </div>
+                        <div class="form-check form-switch mb-0">
+                            <input class="form-check-input" type="checkbox" id="rawConnToggle" @bind="Connection.UseRawConnectionString">
+                            <label class="form-check-label small text-muted" for="rawConnToggle">Directa</label>
+                        </div>
+                    </div>
+                    <div class="p-3">
+                        @if (Connection.UseRawConnectionString)
+                        {
+                            <div class="mb-3">
+                                <label class="form-label small fw-semibold text-secondary">Cadena de Conexión Completa</label>
+                                <textarea class="form-control font-monospace small" rows="4" 
+                                          placeholder="Data Source=...;Initial Catalog=...;Integrated Security=True;Encrypt=True;TrustServerCertificate=True;"
+                                          @bind="Connection.CustomConnectionString"></textarea>
+                            </div>
+                        }
+                        else
+                        {
+                            <div class="mb-3">
+                                <label class="form-label small fw-semibold text-secondary">Servidor / Instancia</label>
+                                <div class="input-group">
+                                    <span class="input-group-text bg-light text-muted border-end-0"><i class="bi bi-server"></i></span>
+                                    <input type="text" class="form-control border-start-0" @bind="Connection.Server" placeholder="ej. localhost\SQLEXPRESS" />
+                                </div>
+                            </div>
+
+                            <div class="mb-3">
+                                <label class="form-label small fw-semibold text-secondary">Modo de Autenticación</label>
+                                <select class="form-select"
+                                        @key="@("auth-mode-select")"
+                                        value="@(Connection.UseWindowsAuth ? "windows" : "sql")"
+                                        @onchange="OnAuthModeChanged">
+                                    <option value="windows">Autenticación de Windows (Integrada)</option>
+                                    <option value="sql">Autenticación de SQL Server</option>
+                                </select>
+                            </div>
+
+                            @if (!Connection.UseWindowsAuth)
+                            {
+                                <div class="row g-2 mb-3">
+                                    <div class="col-6">
+                                        <label class="form-label small fw-semibold text-secondary">Usuario SQL</label>
+                                        <input type="text" class="form-control" @bind="Connection.Username" placeholder="sa" />
+                                    </div>
+                                    <div class="col-6">
+                                        <label class="form-label small fw-semibold text-secondary">Contraseña</label>
+                                        <input type="password" class="form-control" @bind="Connection.Password" />
+                                    </div>
+                                </div>
+                            }
+
+                            <div class="row g-2 mb-3">
+                                <div class="col-6">
+                                    <div class="form-check">
+                                        <input class="form-check-input" type="checkbox" id="encryptChk" @bind="Connection.Encrypt">
+                                        <label class="form-check-label small text-muted" for="encryptChk">Encrypt</label>
+                                    </div>
+                                </div>
+                                <div class="col-6">
+                                    <div class="form-check">
+                                        <input class="form-check-input" type="checkbox" id="trustCertChk" @bind="Connection.TrustServerCertificate">
+                                        <label class="form-check-label small text-muted" for="trustCertChk">Trust Certificate</label>
+                                    </div>
+                                </div>
+                            </div>
+                        }
+
+                        <button class="btn btn-corporate w-100 py-2" @onclick="ConnectAndFetchDatabases" disabled="@IsConnecting">
+                            @if (IsConnecting)
+                            {
+                                <span class="spinner-border spinner-border-sm me-2" role="status"></span>
+                                <span>Verificando conexión...</span>
+                            }
+                            else
+                            {
+                                <span><i class="bi bi-box-arrow-in-right me-2"></i>Conectar y Listar Bases de Datos</span>
+                            }
+                        </button>
+
+                        @if (!string.IsNullOrEmpty(ServerInfo))
+                        {
+                            <div class="mt-3 p-2 bg-success-subtle border border-success-subtle rounded text-success small d-flex align-items-center gap-2">
+                                <i class="bi bi-check2-circle fs-5"></i>
+                                <span class="text-truncate">@ServerInfo</span>
+                            </div>
+                        }
+                    </div>
+                </div>
+
+                <!-- PASO 3: BRANDING Y PERSONALIZACIÓN -->
+                <div class="dash-card mb-4">
+                    <div class="dash-card-header d-flex align-items-center gap-2">
+                        <span class="step-indicator">3</span>
+                        <h5 class="fw-bold mb-0" style="color: #1B365D;">Personalización Corporativa</h5>
+                    </div>
+                    <div class="p-3">
+                        <div class="mb-3">
+                            <label class="form-label small fw-semibold text-secondary">Nombre de la Institución / Empresa</label>
+                            <input type="text" class="form-control" @bind="Customization.InstitutionTitle" placeholder="ej. Dirección de Tecnología y Sistemas" />
+                        </div>
+
+                        <div class="mb-3">
+                            <label class="form-label small fw-semibold text-secondary">Título del Documento Word</label>
+                            <input type="text" class="form-control" @bind="Customization.DocumentTitle" />
+                        </div>
+
+                        <div class="mb-3">
+                            <label class="form-label small fw-semibold text-secondary d-block">Color Primario Institucional</label>
+                            <div class="d-flex align-items-center gap-2">
+                                <input type="color" class="form-control form-control-color border-0 p-1" style="width: 50px; height: 38px; cursor: pointer;" 
+                                       @bind="Customization.PrimaryColorHex" title="Seleccione color" />
+                                <input type="text" class="form-control font-monospace" @bind="Customization.PrimaryColorHex" />
+                                <div class="px-3 py-1 rounded text-white small fw-bold" style="background-color: @Customization.PrimaryColorHex;">
+                                    Muestra
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="mb-2">
+                            <label class="form-label small fw-semibold text-secondary">Logotipo Corporativo (PNG/JPG)</label>
+                            <InputFile OnChange="HandleLogoUpload" class="form-control form-control-sm" accept="image/png,image/jpeg" />
+                            @if (Customization.LogoBytes != null)
+                            {
+                                <div class="mt-2 p-2 bg-light border rounded d-flex align-items-center justify-content-between">
+                                    <div class="d-flex align-items-center gap-2">
+                                        <i class="bi bi-file-earmark-image text-primary"></i>
+                                        <span class="small text-truncate" style="max-width: 160px;">@Customization.LogoFileName</span>
+                                    </div>
+                                    <button type="button" class="btn btn-outline-danger btn-sm py-0 px-2" @onclick="RemoveLogo">
+                                        <i class="bi bi-trash"></i>
+                                    </button>
+                                </div>
+                            }
+                        </div>
+                    </div>
+                </div>
+
+            </div>
+
+            <!-- Columna Derecha (Paso 2 y Paso 4) -->
+            <div class="col-xl-8 col-lg-7">
+
+                <!-- PASO 2: ALCANCE DE TABLAS Y ESQUEMAS -->
+                <div class="dash-card mb-4">
+                    <div class="dash-card-header d-flex flex-wrap justify-content-between align-items-center gap-2">
+                        <div class="d-flex align-items-center gap-2">
+                            <span class="step-indicator">2</span>
+                            <h5 class="fw-bold mb-0" style="color: #1B365D;">Selección de Base de Datos y Alcance</h5>
+                        </div>
+
+                        @if (SchemaGroups.Count > 0)
+                        {
+                            <div class="d-flex align-items-center gap-2">
+                                <span class="badge bg-primary px-2 py-1">@SelectedTableCount seleccionadas</span>
+                                <div class="btn-group btn-group-sm">
+                                    <button class="btn btn-outline-primary" @onclick="() => SetAllTables(true)">
+                                        <i class="bi bi-check-all me-1"></i>Todas
+                                    </button>
+                                    <button class="btn btn-outline-secondary" @onclick="() => SetAllTables(false)">
+                                        <i class="bi bi-x-lg me-1"></i>Ninguna
+                                    </button>
+                                </div>
+                            </div>
+                        }
+                    </div>
+                    <div class="p-3">
+                        <div class="row g-3 mb-3">
+                            <div class="col-md-6">
+                                <label class="form-label small fw-semibold text-secondary">Base de Datos de Usuario</label>
+                                <select class="form-select" @onchange="OnDatabaseSelected" disabled="@(Databases.Count == 0 || IsLoadingTables)">
+                                    <option value="">-- Seleccione una base de datos --</option>
+                                    @foreach (var db in Databases)
+                                    {
+                                        <option value="@db.Name" selected="@(db.Name == SelectedDatabase)">@db.Name</option>
+                                    }
+                                </select>
+                            </div>
+                            <div class="col-md-6">
+                                <label class="form-label small fw-semibold text-secondary">Filtro de Tablas en Tiempo Real</label>
+                                <div class="input-group">
+                                    <span class="input-group-text bg-light text-muted border-end-0"><i class="bi bi-search"></i></span>
+                                    <input type="text" class="form-control border-start-0" 
+                                           placeholder="Buscar por tabla o esquema..." 
+                                           @bind="SearchFilter" 
+                                           @bind:event="oninput" 
+                                           disabled="@(SchemaGroups.Count == 0)" />
+                                    @if (!string.IsNullOrEmpty(SearchFilter))
+                                    {
+                                        <button class="btn btn-outline-secondary" type="button" @onclick="() => SearchFilter = string.Empty">
+                                            <i class="bi bi-x"></i>
+                                        </button>
+                                    }
+                                </div>
+                            </div>
+                        </div>
+
+                        @if (IsLoadingTables)
+                        {
+                            <div class="text-center py-5">
+                                <div class="spinner-border text-primary" style="width: 2.5rem; height: 2.5rem;" role="status"></div>
+                                <p class="text-muted small mt-2 mb-0">Consultando catálogo sin bloqueos (READ UNCOMMITTED)...</p>
+                            </div>
+                        }
+                        else if (SchemaGroups.Count > 0)
+                        {
+                            <div class="tables-tree-container p-2">
+                                @{
+                                    var filteredSchemas = FilteredSchemaGroups;
+                                }
+                                @if (filteredSchemas.Count == 0)
+                                {
+                                    <div class="text-center py-4 text-muted small">
+                                        <i class="bi bi-search me-1"></i>No se encontraron tablas que coincidan con "<strong>@SearchFilter</strong>".
+                                    </div>
+                                }
+                                else
+                                {
+                                    @foreach (var schema in filteredSchemas)
+                                    {
+                                        <div class="card mb-2 border-0 shadow-none bg-white">
+                                            <div class="card-header bg-light py-2 px-3 d-flex align-items-center justify-content-between border rounded-top">
+                                                <div class="form-check mb-0">
+                                                    <input class="form-check-input" type="checkbox" id="@($"schema_{schema.SchemaName}")"
+                                                           @bind="schema.IsSelected" />
+                                                    <label class="form-check-label fw-bold small text-uppercase" for="@($"schema_{schema.SchemaName}")" style="color: #1B365D;">
+                                                        Esquema: @schema.SchemaName
+                                                    </label>
+                                                </div>
+                                                <span class="badge badge-schema">
+                                                    @schema.SelectedCount / @schema.Tables.Count tablas
+                                                </span>
+                                            </div>
+                                            <div class="card-body p-2 border-start border-end border-bottom rounded-bottom">
+                                                <div class="row row-cols-1 row-cols-md-2 row-cols-xl-3 g-2">
+                                                    @foreach (var tbl in schema.Tables)
+                                                    {
+                                                        <div class="col">
+                                                            <div class="table-item-card d-flex align-items-center justify-content-between">
+                                                                <div class="form-check text-truncate mb-0 me-2" style="max-width: 75%;">
+                                                                    <input class="form-check-input" type="checkbox" id="@($"tbl_{tbl.FullName}")"
+                                                                           @bind="tbl.IsSelected" />
+                                                                    <label class="form-check-label small fw-semibold text-dark text-truncate" for="@($"tbl_{tbl.FullName}")" title="@tbl.FullName">
+                                                                        @tbl.TableName
+                                                                    </label>
+                                                                </div>
+                                                                <div class="d-flex align-items-center gap-1 flex-shrink-0">
+                                                                    @if (tbl.HasPrimaryKey)
+                                                                    {
+                                                                        <span class="badge-pk" title="Tiene Clave Primaria (PK)">PK</span>
+                                                                    }
+                                                                    <span class="badge-cols">@tbl.ColumnCount cols</span>
+                                                                </div>
+                                                            </div>
+                                                        </div>
+                                                    }
+                                                </div>
+                                            </div>
+                                        </div>
+                                    }
+                                }
+                            </div>
+                        }
+                        else if (Databases.Count > 0)
+                        {
+                            <div class="text-center py-5 text-muted small bg-light rounded border border-dashed">
+                                <i class="bi bi-arrow-up-circle fs-3 text-primary d-block mb-2"></i>
+                                Seleccione una base de datos arriba para inspeccionar sus esquemas y tablas.
+                            </div>
+                        }
+                        else
+                        {
+                            <div class="text-center py-5 text-muted small bg-light rounded border border-dashed">
+                                <i class="bi bi-database fs-3 text-secondary d-block mb-2"></i>
+                                Conéctese a una instancia de SQL Server en el Paso 1 para desplegar las bases de datos.
+                            </div>
+                        }
+                    </div>
+                </div>
+
+                <!-- PASO 4: GENERACIÓN Y DESCARGA -->
+                <div class="dash-card">
+                    <div class="dash-card-header d-flex align-items-center gap-2">
+                        <span class="step-indicator">4</span>
+                        <h5 class="fw-bold mb-0" style="color: #1B365D;">Generación y Descarga Streaming</h5>
+                    </div>
+                    <div class="p-4 text-center">
+                        @if (IsGenerating)
+                        {
+                            <div class="py-2">
+                                <div class="spinner-border text-primary mb-3" style="width: 3.5rem; height: 3.5rem;" role="status"></div>
+                                <h5 class="fw-bold text-dark mb-1">@ProgressPhase</h5>
+                                <p class="text-muted small mb-3">@ProgressDetail</p>
+                                <div class="progress mx-auto" style="height: 10px; max-width: 500px;">
+                                    <div class="progress-bar progress-bar-striped progress-bar-animated bg-success" 
+                                         role="progressbar" 
+                                         style="width: @(ProgressPercent)%;"></div>
+                                </div>
+                            </div>
+                        }
+                        else
+                        {
+                            <div class="mb-3">
+                                <button class="btn btn-generate btn-lg px-5 py-3 shadow"
+                                        @onclick="GenerateAndDownloadDictionary"
+                                        disabled="@(string.IsNullOrEmpty(SelectedDatabase) || SelectedTableCount == 0)">
+                                    <i class="bi bi-file-earmark-word-fill me-2 fs-5"></i>Generar y Descargar Diccionario Word (.docx)
+                                </button>
+                            </div>
+                            <p class="text-muted small mb-0">
+                                <i class="bi bi-info-circle me-1"></i>
+                                Incluye el Historial de Modificaciones y Campos Deprecados formalmente justificados.
+                            </p>
+                        }
+                    </div>
+                </div>
+
+            </div>
+        </div>
+    }
+
+    <!-- ========================================================================= -->
+    <!-- PESTAÑA 2: ASISTENTE INTELIGENTE Y AUDITORÍA DE METADATOS -->
+    <!-- ========================================================================= -->
+    @if (ActiveTab == "assistant")
+    {
+        <div class="dash-card mb-4 p-4">
+            <div class="d-flex flex-wrap align-items-center justify-content-between gap-3 mb-3 pb-3 border-bottom">
+                <div>
+                    <h4 class="fw-bold mb-1" style="color: #1B365D;">
+                        <i class="bi bi-magic me-2"></i>Asistente de Metadatos y Auditoría en Vivo
+                    </h4>
+                    <p class="text-muted small mb-0">
+                        Base de Datos: <strong>@(SelectedDatabase ?? "Ninguna seleccionada")</strong> | 
+                        Permite revisar sugerencias automáticas y persistirlas en <span class="font-monospace">sys.extended_properties</span>.
+                    </p>
+                </div>
+                <div class="d-flex align-items-center gap-2">
+                    <button class="btn btn-outline-primary btn-sm fw-semibold" @onclick="LoadAuditDataAsync" disabled="@(string.IsNullOrEmpty(SelectedDatabase) || IsLoadingAudit)">
+                        @if (IsLoadingAudit)
+                        {
+                            <span class="spinner-border spinner-border-sm me-1"></span>
+                            <span>Analizando...</span>
+                        }
+                        else
+                        {
+                            <i class="bi bi-arrow-repeat me-1"></i>
+                            <span>Refrescar / Auditar</span>
+                        }
+                    </button>
+                    @if (AuditDictionary != null && AuditDictionary.TotalColumns > 0)
+                    {
+                        <button class="btn btn-outline-success btn-sm fw-semibold" @onclick="ApplyAllSuggestions">
+                            <i class="bi bi-stars me-1"></i>Aplicar Todas las Sugerencias
+                        </button>
+                        <button class="btn btn-success btn-sm fw-bold px-3" @onclick="SaveDescriptionsToDatabaseAsync" disabled="@IsSavingToDb">
+                            @if (IsSavingToDb)
+                            {
+                                <span class="spinner-border spinner-border-sm me-1"></span>
+                                <span>Guardando en BD...</span>
+                            }
+                            else
+                            {
+                                <i class="bi bi-database-fill-check me-1"></i>
+                                <span>Guardar Descripciones en BD</span>
+                            }
+                        </button>
+                    }
+                </div>
+            </div>
+
+            @if (AuditDictionary == null && !IsLoadingAudit)
+            {
+                <div class="text-center py-5 bg-light rounded border border-dashed">
+                    <i class="bi bi-cpu fs-1 text-primary d-block mb-2"></i>
+                    @if (string.IsNullOrEmpty(SelectedDatabase))
+                    {
+                        <p class="text-muted mb-0">Seleccione una base de datos en la pestaña "Exportador Word" para activar la auditoría.</p>
+                    }
+                    else
+                    {
+                        <p class="text-muted mb-3">Haga clic en el botón para auditar las tablas seleccionadas de '<strong>@SelectedDatabase</strong>'.</p>
+                        <button class="btn btn-corporate" @onclick="LoadAuditDataAsync">
+                            <i class="bi bi-play-circle me-1"></i>Iniciar Análisis y Sugerencia Inteligente
+                        </button>
+                    }
+                </div>
+            }
+            else if (IsLoadingAudit)
+            {
+                <div class="text-center py-5">
+                    <div class="spinner-border text-primary mb-3" style="width: 3rem; height: 3rem;" role="status"></div>
+                    <h5 class="fw-bold text-dark">Ejecutando Asistente de Metadatos...</h5>
+                    <p class="text-muted small">Cruzando glosario maestro, reutilización semántica e inferencia de tipos...</p>
+                </div>
+            }
+            else if (AuditDictionary != null)
+            {
+                <!-- Resumen de Métricas -->
+                <div class="row g-3 mb-4">
+                    <div class="col-md-3 col-sm-6">
+                        <div class="p-3 bg-light rounded border">
+                            <div class="small text-muted fw-semibold">Total Columnas</div>
+                            <div class="fs-4 fw-bold text-dark">@AuditDictionary.TotalColumns</div>
+                            <div class="small text-muted">en @AuditDictionary.TotalTables tablas</div>
+                        </div>
+                    </div>
+                    <div class="col-md-3 col-sm-6">
+                        <div class="p-3 bg-success-subtle border border-success-subtle rounded">
+                            <div class="small text-success fw-semibold">Documentadas en BD</div>
+                            <div class="fs-4 fw-bold text-success">@CountDocumented</div>
+                            <div class="small text-muted">@PercentDocumented% del catálogo</div>
+                        </div>
+                    </div>
+                    <div class="col-md-3 col-sm-6">
+                        <div class="p-3 bg-primary-subtle border border-primary-subtle rounded">
+                            <div class="small text-primary fw-semibold">Glosario / FK / Semántica</div>
+                            <div class="fs-4 fw-bold text-primary">@CountGlossaryAndSemantic</div>
+                            <div class="small text-muted">reglas de alta confianza</div>
+                        </div>
+                    </div>
+                    <div class="col-md-3 col-sm-6">
+                        <div class="p-3 bg-purple-subtle border border-purple-subtle rounded" style="background-color: #FAF5FF; border-color: #E9D5FF !important;">
+                            <div class="small fw-semibold" style="color: #6B21A8;">Patrón Semántico / PK</div>
+                            <div class="fs-4 fw-bold" style="color: #6B21A8;">@CountInferred</div>
+                            <div class="small text-muted">análisis contextualizado</div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Filtros -->
+                <div class="row g-2 align-items-center mb-3">
+                    <div class="col-md-8">
+                        <div class="input-group input-group-sm">
+                            <span class="input-group-text bg-white text-muted border-end-0"><i class="bi bi-funnel"></i></span>
+                            <input type="text" class="form-control border-start-0" 
+                                   placeholder="Filtrar por columna o tabla..." 
+                                   @bind="AuditFilterText" 
+                                   @bind:event="oninput" />
+                        </div>
+                    </div>
+                    <div class="col-md-4">
+                        <select class="form-select form-select-sm" @bind="AuditStatusFilter">
+                            <option value="ALL">Todas las Columnas (@AuditDictionary.TotalColumns)</option>
+                            <option value="UNDOCUMENTED">Solo Indocumentadas en BD (@AuditDictionary.TotalUndocumentedColumns)</option>
+                            <option value="GLOSSARY">Solo [Glosario Maestro] (@CountGlossary)</option>
+                            <option value="FK">Solo [Referencia FK] (@CountFK)</option>
+                            <option value="SEMANTIC">Solo [Semántica Reutilizada] (@CountSemantic)</option>
+                            <option value="INFERRED">Solo [Patrón Semántico] (@CountInferred)</option>
+                        </select>
+                    </div>
+                </div>
+
+                <!-- Lista de Columnas Auditadas -->
+                <div class="border rounded p-2 bg-light" style="max-height: 520px; overflow-y: auto;">
+                    @foreach (var schema in AuditDictionary.Schemas)
+                    {
+                        foreach (var table in schema.Tables)
+                        {
+                            var matchingColumns = GetFilteredColumns(table);
+                            if (matchingColumns.Count == 0 && !table.FullName.Contains(AuditFilterText, StringComparison.OrdinalIgnoreCase))
+                            {
+                                continue;
+                            }
+
+                            <div class="card mb-3 border shadow-sm bg-white">
+                                <div class="card-header bg-white py-2 px-3 d-flex flex-wrap align-items-center justify-content-between border-bottom">
+                                    <div class="d-flex align-items-center gap-2">
+                                        <i class="bi bi-table text-primary"></i>
+                                        <span class="fw-bold" style="color: #1B365D;">@table.FullName</span>
+                                        <span class="badge bg-secondary-subtle text-secondary small">@table.Columns.Count columnas</span>
+                                        @if (table.UndocumentedColumnsCount > 0)
+                                        {
+                                            <span class="badge bg-warning-subtle text-warning-emphasis small border border-warning-subtle">
+                                                @table.UndocumentedColumnsCount indocumentadas
+                                            </span>
+                                        }
+                                        else
+                                        {
+                                            <span class="badge bg-success-subtle text-success small border border-success-subtle">
+                                                100% documentada
+                                            </span>
+                                        }
+                                    </div>
+                                    <div class="d-flex align-items-center gap-2" style="max-width: 480px; width: 100%;">
+                                        <input type="text" class="form-control form-control-sm" 
+                                               placeholder="Descripción de la tabla..." 
+                                               @bind="table.EditableDescription" 
+                                               @bind:after="() => table.IsDirty = true" />
+                                    </div>
+                                </div>
+                                <div class="card-body p-0">
+                                    <div class="table-responsive">
+                                        <table class="table table-hover table-sm align-middle mb-0" style="font-size: 0.86rem;">
+                                            <thead class="table-light text-secondary">
+                                                <tr>
+                                                    <th style="width: 22%;">Campo</th>
+                                                    <th style="width: 15%;">Tipo / Long</th>
+                                                    <th style="width: 20%;">Origen Sugerencia</th>
+                                                    <th style="width: 43%;">Descripción (Editable en Línea)</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody>
+                                                @foreach (var col in matchingColumns)
+                                                {
+                                                    <tr>
+                                                        <td>
+                                                            <div class="d-flex align-items-center gap-1">
+                                                                @if (col.IsPrimaryKey)
+                                                                {
+                                                                    <span class="badge-pk">PK</span>
+                                                                }
+                                                                <span class="fw-semibold text-dark">@col.Name</span>
+                                                            </div>
+                                                        </td>
+                                                        <td>
+                                                            <span class="font-monospace text-muted small">@col.DataType (@col.Length)</span>
+                                                        </td>
+                                                        <td>
+                                                            @if (col.HasExistingDescription)
+                                                            {
+                                                                <span class="badge-source-db" title="Descripción obtenida de sys.extended_properties (MS_Description)">
+                                                                    <i class="bi bi-database me-1"></i>[En BD]
+                                                                </span>
+                                                            }
+                                                            else if (col.SuggestionSource == SuggestionSourceType.MasterGlossary)
+                                                            {
+                                                                <span class="badge-source-glossary" title="Coincidencia con dbo.Diccionario_Glosario_Maestro">
+                                                                    <i class="bi bi-book me-1"></i>[Glosario Maestro]
+                                                                </span>
+                                                            }
+                                                            else if (col.SuggestionSource == SuggestionSourceType.ForeignKeyReference)
+                                                            {
+                                                                <span class="badge-source-fk" title="Clave Foránea vinculada a entidad relacional">
+                                                                    <i class="bi bi-link-45deg me-1"></i>[Referencia FK]
+                                                                </span>
+                                                            }
+                                                            else if (col.SuggestionSource == SuggestionSourceType.SemanticReuse)
+                                                            {
+                                                                <span class="badge-source-semantic" title="Reutilizada de otra tabla documentada">
+                                                                    <i class="bi bi-arrow-repeat me-1"></i>[Semántica] (@col.SemanticSourceTable)
+                                                                </span>
+                                                            }
+                                                            else
+                                                            {
+                                                                <span class="badge-source-inference" title="Inferencia semántica por nomenclatura y tipo de dato">
+                                                                    <i class="bi bi-cpu me-1"></i>[Patrón Semántico]
+                                                                </span>
+                                                            }
+                                                        </td>
+                                                        <td>
+                                                            <div class="d-flex align-items-center gap-2">
+                                                                <input type="text" class="form-control form-control-sm @(col.IsDirty ? "border-primary" : "")" 
+                                                                       @bind="col.EditableDescription" 
+                                                                       @bind:after="() => col.IsDirty = true" />
+                                                                @if (!string.IsNullOrWhiteSpace(col.SuggestedDescription) && col.EditableDescription != col.SuggestedDescription)
+                                                                {
+                                                                    <button class="btn btn-outline-primary btn-sm py-0 px-2 flex-shrink-0" 
+                                                                            title="Aplicar sugerencia"
+                                                                            @onclick="() => { col.EditableDescription = col.SuggestedDescription; col.IsDirty = true; }">
+                                                                        <i class="bi bi-stars"></i>
+                                                                    </button>
+                                                                }
+                                                            </div>
+                                                        </td>
+                                                    </tr>
+                                                }
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                </div>
+                            </div>
+                        }
+                    }
+                </div>
+            }
+        </div>
+    }
+
+    <!-- ========================================================================= -->
+    <!-- PESTAÑA 3: AUDITORÍA DE ESQUEMA Y CAMPOS DEPRECADOS -->
+    <!-- ========================================================================= -->
+    @if (ActiveTab == "drift")
+    {
+        <div class="dash-card mb-4 p-4">
+            <div class="d-flex flex-wrap align-items-center justify-content-between gap-3 mb-4 pb-3 border-bottom">
+                <div>
+                    <h4 class="fw-bold mb-1" style="color: #1B365D;">
+                        <i class="bi bi-diagram-3 me-2"></i>Auditoría de Esquema y Justificación de Campos Deprecados
+                    </h4>
+                    <p class="text-muted small mb-0">
+                        Base de Datos: <strong>@(SelectedDatabase ?? "Ninguna seleccionada")</strong> | 
+                        Control de versiones de esquema contra snapshot y justificación formal de eliminaciones (<span class="font-monospace">dbo.Diccionario_Campos_Deprecados</span>).
+                    </p>
+                </div>
+                <div class="d-flex align-items-center gap-2">
+                    <button class="btn btn-outline-secondary btn-sm fw-semibold" @onclick="TakeSnapshotAsync" disabled="@(string.IsNullOrEmpty(SelectedDatabase) || IsTakingSnapshot)">
+                        @if (IsTakingSnapshot)
+                        {
+                            <span class="spinner-border spinner-border-sm me-1"></span>
+                            <span>Guardando Snapshot...</span>
+                        }
+                        else
+                        {
+                            <i class="bi bi-camera me-1"></i>
+                            <span>Tomar Snapshot Actual</span>
+                        }
+                    </button>
+                    <button class="btn btn-corporate btn-sm fw-semibold" @onclick="CheckSchemaDriftAsync" disabled="@(string.IsNullOrEmpty(SelectedDatabase) || IsCheckingDrift)">
+                        @if (IsCheckingDrift)
+                        {
+                            <span class="spinner-border spinner-border-sm me-1"></span>
+                            <span>Detectando Cambios...</span>
+                        }
+                        else
+                        {
+                            <i class="bi bi-search me-1"></i>
+                            <span>Detectar Diferencias / Cambios</span>
+                        }
+                    </button>
+                </div>
+            </div>
+
+            <!-- Resumen de Estado — Stat Cards Minimalistas -->
+            <div class="row g-3 mb-4">
+                <div class="col-xl col-md-4 col-sm-6">
+                    <div class="stat-card @(HasActiveSnapshot ? "success" : "")">
+                        <div class="stat-card-label">Estado Snapshot</div>
+                        <div class="stat-card-value" style="font-size: 1.1rem;">
+                            <i class="bi @(HasActiveSnapshot ? "bi-check-circle-fill" : "bi-dash-circle") me-1"></i>
+                            @(HasActiveSnapshot ? "Activo" : "Sin Snapshot")
+                        </div>
+                        <div class="stat-card-note">@(SnapshotDate.HasValue ? SnapshotDate.Value.ToString("dd MMM yyyy HH:mm") : "Pendiente")</div>
+                    </div>
+                </div>
+                <div class="col-xl col-md-4 col-sm-6">
+                    <div class="stat-card @(CountTruncationRisks > 0 ? "danger" : "warning")">
+                        <div class="stat-card-label">Modificaciones</div>
+                        <div class="stat-card-value">@CountModifiedDrift</div>
+                        <div class="stat-card-note">
+                            @(CountTruncationRisks > 0 ? $"⚠ {CountTruncationRisks} riesgo truncamiento" : "sin riesgo de truncamiento")
+                        </div>
+                    </div>
+                </div>
+                <div class="col-xl col-md-4 col-sm-6">
+                    <div class="stat-card danger">
+                        <div class="stat-card-label">Campos Eliminados</div>
+                        <div class="stat-card-value">@CountDeletedDrift</div>
+                        <div class="stat-card-note">@CountUnjustifiedDeleted por justificar</div>
+                    </div>
+                </div>
+                <div class="col-xl col-md-4 col-sm-6">
+                    <div class="stat-card success">
+                        <div class="stat-card-label">Campos Nuevos</div>
+                        <div class="stat-card-value">@CountNewDrift</div>
+                        <div class="stat-card-note">agregados recientemente</div>
+                    </div>
+                </div>
+                <div class="col-xl col-md-4 col-sm-6">
+                    <div class="stat-card accent">
+                        <div class="stat-card-label">Versiones Aprobadas</div>
+                        <div class="stat-card-value">@VersionHistoryList.Count</div>
+                        <div class="stat-card-note">cambios auditados</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Tabla de Discrepancias / Drift -->
+            @if (DriftAlerts.Count > 0)
+            {
+                <h6 class="fw-bold mb-3" style="color: #1B365D;">
+                    <i class="bi bi-exclamation-triangle text-warning me-1"></i>Discrepancias Detectadas contra el Snapshot
+                </h6>
+                <div class="table-responsive border rounded mb-4 bg-white">
+                    <table class="table table-hover align-middle mb-0" style="font-size: 0.88rem;">
+                        <thead class="table-light text-secondary">
+                            <tr>
+                                <th style="width: 22%;">Esquema / Tabla</th>
+                                <th style="width: 16%;">Campo</th>
+                                <th style="width: 14%;">Tipo / Long Físico</th>
+                                <th style="width: 16%;">Auditoría Snapshot</th>
+                                <th style="width: 18%;">Alerta de Esquema</th>
+                                <th style="width: 14%;" class="text-end">Acción de Gobierno</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var alert in DriftAlerts)
+                            {
+                                <tr>
+                                    <td>
+                                        <span class="fw-semibold text-dark">@alert.FullTableName</span>
+                                    </td>
+                                    <td>
+                                        <span class="font-monospace fw-bold">@alert.Campo</span>
+                                    </td>
+                                    <td>
+                                        <span class="text-muted small">@alert.TipoDato (@alert.Longitud)</span>
+                                    </td>
+                                    <td>
+                                        @if (alert.DriftType == SchemaDriftType.NewInDatabase)
+                                        {
+                                            <span class="badge bg-light text-muted border">Pendiente Snapshot</span>
+                                        }
+                                        else
+                                        {
+                                            <div>
+                                                <span class="badge bg-primary-subtle text-primary border border-primary-subtle fw-bold">v@(alert.VersionActual)</span>
+                                                <div class="small text-muted" style="font-size: 0.74rem;">
+                                                    <i class="bi bi-person me-1"></i>@(alert.CreadoPor)
+                                                </div>
+                                                @if (alert.FechaModificacion.HasValue)
+                                                {
+                                                    <div class="small text-muted" style="font-size: 0.72rem;">
+                                                        <i class="bi bi-pencil me-1"></i>@(alert.FechaModificacion.Value.ToString("yyyy-MM-dd"))
+                                                    </div>
+                                                }
+                                            </div>
+                                        }
+                                    </td>
+                                    <td>
+                                        @if (alert.DriftType == SchemaDriftType.DeletedFromDatabase)
+                                        {
+                                            @if (alert.IsJustified)
+                                            {
+                                                <span class="badge bg-secondary-subtle text-secondary border">
+                                                    <i class="bi bi-shield-check me-1"></i>Eliminación Justificada
+                                                </span>
+                                            }
+                                            else
+                                            {
+                                                <span class="badge bg-danger text-white">
+                                                    <i class="bi bi-trash-fill me-1"></i>CAMPO ELIMINADO EN BD
+                                                </span>
+                                            }
+                                        }
+                                        else if (alert.DriftType == SchemaDriftType.ModifiedInDatabase)
+                                        {
+                                            @if (alert.IsTruncationRisk)
+                                            {
+                                                <div>
+                                                    <span class="badge bg-danger text-white border border-danger shadow-sm">
+                                                        <i class="bi bi-exclamation-octagon-fill me-1"></i>RIESGO TRUNCAMIENTO
+                                                    </span>
+                                                    <div class="small text-danger fw-bold mt-1" style="font-size: 0.76rem;">
+                                                        @alert.PropiedadModificada: 
+                                                        <span class="text-decoration-line-through">@alert.ValorAnterior</span> &rarr; @alert.ValorNuevo
+                                                    </div>
+                                                </div>
+                                            }
+                                            else
+                                            {
+                                                <div>
+                                                    <span class="badge bg-warning text-dark border border-warning">
+                                                        <i class="bi bi-pencil-square me-1"></i>MODIFICADO EN BD
+                                                    </span>
+                                                    <div class="small text-secondary mt-1" style="font-size: 0.76rem;">
+                                                        @alert.PropiedadModificada: @alert.ValorAnterior &rarr; @alert.ValorNuevo
+                                                    </div>
+                                                </div>
+                                            }
+                                        }
+                                        else
+                                        {
+                                            <span class="badge bg-success-subtle text-success border border-success-subtle">
+                                                <i class="bi bi-plus-circle me-1"></i>NUEVO CAMPO EN BD
+                                            </span>
+                                        }
+                                    </td>
+                                    <td class="text-end">
+                                        <div class="d-flex align-items-center justify-content-end gap-1">
+                                            @if (alert.DriftType == SchemaDriftType.DeletedFromDatabase)
+                                            {
+                                                @if (!alert.IsJustified)
+                                                {
+                                                    <button class="btn btn-danger btn-sm py-1 px-2 fw-semibold shadow-sm"
+                                                            @onclick="() => OpenJustifyModal(alert)">
+                                                        <i class="bi bi-pencil-square me-1"></i>Justificar
+                                                    </button>
+                                                }
+                                                else
+                                                {
+                                                    <button class="btn btn-outline-secondary btn-sm py-1 px-2"
+                                                            @onclick="() => OpenJustifyModal(alert)" title="Ver justificación">
+                                                        <i class="bi bi-eye me-1"></i>Motivo
+                                                    </button>
+                                                }
+                                            }
+                                            else if (alert.DriftType == SchemaDriftType.ModifiedInDatabase)
+                                            {
+                                                <button class="btn @(alert.IsTruncationRisk ? "btn-outline-danger" : "btn-warning") btn-sm py-1 px-2 fw-bold shadow-sm"
+                                                        @onclick="() => OpenApproveModal(alert)" title="Aprobar modificación y registrar en historial">
+                                                    <i class="bi bi-check2-circle me-1"></i>Aprobar
+                                                </button>
+                                            }
+                                            <button class="btn btn-outline-secondary btn-sm py-1 px-2"
+                                                    @onclick="() => OpenFieldHistoryModal(alert)" title="Ver historial de cambios de este campo">
+                                                <i class="bi bi-clock-history"></i>
+                                            </button>
+                                        </div>
+                                    </td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            }
+            else if (!IsCheckingDrift)
+            {
+                <div class="alert alert-light border text-muted small mb-4">
+                    <i class="bi bi-info-circle me-1"></i>
+                    No hay alertas activas de discrepancia de esquema. Pulse "Detectar Diferencias / Cambios" para contrastar el estado actual con el snapshot.
+                </div>
+            }
+
+            <!-- Historial de Modificaciones Estructurales Aprobadas -->
+            <h6 class="fw-bold mb-3" style="color: #1B365D;">
+                <i class="bi bi-clock-history text-primary me-1"></i>Historial de Versiones y Modificaciones Estructurales (<span class="font-monospace">dbo.Diccionario_Historial_Versiones</span>)
+            </h6>
+            @if (VersionHistoryList.Count == 0)
+            {
+                <div class="text-center py-4 bg-light rounded border text-muted small mb-4">
+                    <em>No se registran cambios estructurales aprobados en el historial de versiones de esta base de datos.</em>
+                </div>
+            }
+            else
+            {
+                <div class="table-responsive border rounded bg-white mb-4" style="max-height: 380px; overflow-y: auto;">
+                    <table class="table table-hover align-middle mb-0" style="font-size: 0.88rem;">
+                        <thead class="table-light text-secondary sticky-top">
+                            <tr>
+                                <th style="width: 22%;">Esquema / Tabla</th>
+                                <th style="width: 15%;">Campo</th>
+                                <th style="width: 14%;">Propiedad</th>
+                                <th style="width: 12%;">Valor Anterior</th>
+                                <th style="width: 12%;">Valor Nuevo</th>
+                                <th style="width: 13%;">Fecha / Usuario</th>
+                                <th style="width: 12%;">Motivo del Cambio</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var h in VersionHistoryList)
+                            {
+                                <tr>
+                                    <td><span class="fw-semibold">@h.Esquema.@h.Tabla</span></td>
+                                    <td><strong class="font-monospace text-primary">@h.Campo</strong></td>
+                                    <td><span class="badge bg-light text-dark border">@h.PropiedadModificada</span></td>
+                                    <td><span class="text-danger small font-monospace">@h.ValorAnterior</span></td>
+                                    <td><span class="text-success small font-monospace fw-bold">@h.ValorNuevo</span></td>
+                                    <td>
+                                        <div class="small fw-semibold">@h.FechaCambio.ToString("yyyy-MM-dd HH:mm")</div>
+                                        <span class="badge bg-secondary-subtle text-secondary" style="font-size: 0.72rem;">@h.UsuarioResponsable</span>
+                                    </td>
+                                    <td><span class="small text-muted">@h.MotivoCambio</span></td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            }
+
+            <!-- Historial Formal de Campos Deprecados / Eliminados -->
+            <h6 class="fw-bold mb-3" style="color: #1B365D;">
+                <i class="bi bi-archive text-secondary me-1"></i>Historial de Campos Deprecados / Eliminados (<span class="font-monospace">dbo.Diccionario_Campos_Deprecados</span>)
+            </h6>
+            @if (DeprecatedHistory.Count == 0)
+            {
+                <div class="text-center py-4 bg-light rounded border text-muted small">
+                    <em>No se registran campos eliminados o deprecados formalmente en este período.</em>
+                </div>
+            }
+            else
+            {
+                <div class="table-responsive border rounded bg-white">
+                    <table class="table table-hover align-middle mb-0" style="font-size: 0.88rem;">
+                        <thead class="table-light text-secondary">
+                            <tr>
+                                <th style="width: 22%;">Esquema / Tabla</th>
+                                <th style="width: 18%;">Campo Eliminado</th>
+                                <th style="width: 14%;">Tipo Original</th>
+                                <th style="width: 12%;">Fecha</th>
+                                <th style="width: 22%;">Motivo de la Eliminación</th>
+                                <th style="width: 12%;">Responsable</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var dep in DeprecatedHistory)
+                            {
+                                <tr>
+                                    <td>@dep.FullTableName</td>
+                                    <td><strong class="text-danger font-monospace">@dep.Campo</strong></td>
+                                    <td><span class="text-muted small">@dep.TipoDatoOriginal (@dep.LongitudOriginal)</span></td>
+                                    <td><span class="small text-muted">@dep.FechaEliminacion.ToString("yyyy-MM-dd")</span></td>
+                                    <td><span>@dep.MotivoEliminacion</span></td>
+                                    <td><span class="badge bg-light text-dark border">@(string.IsNullOrWhiteSpace(dep.UsuarioResponsable) ? "-" : dep.UsuarioResponsable)</span></td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            }
+        </div>
+    }
+
+    <!-- ========================================================================= -->
+    <!-- PESTAÑA 4: ADMINISTRADOR DE GLOSARIO MAESTRO -->
+    <!-- ========================================================================= -->
+    @if (ActiveTab == "glossary")
+    {
+        <div class="dash-card mb-4 p-4">
+            <div class="d-flex flex-wrap align-items-center justify-content-between gap-3 mb-4 pb-3 border-bottom">
+                <div>
+                    <h4 class="fw-bold mb-1" style="color: #1B365D;">
+                        <i class="bi bi-journal-bookmark me-2"></i>Glosario Corporativo Maestro (<span class="font-monospace">dbo.Diccionario_Glosario_Maestro</span>)
+                    </h4>
+                    <p class="text-muted small mb-0">
+                        Catálogo centralizado de metadatos: asocia a cada <strong>Tabla</strong> física o regla global ('General') su <strong>Campo</strong>, <strong>Tipo</strong>, <strong>Long</strong> y <strong>Descripción</strong> formal.
+                    </p>
+                </div>
+                <div class="d-flex align-items-center gap-2">
+                    <button class="btn btn-outline-primary btn-sm fw-semibold" 
+                            @onclick="SyncCatalogToGlossaryAsync" 
+                            disabled="@(string.IsNullOrEmpty(SelectedDatabase) || IsSyncingGlossary)">
+                        @if (IsSyncingGlossary)
+                        {
+                            <span class="spinner-border spinner-border-sm me-1"></span>
+                            <span>Sincronizando...</span>
+                        }
+                        else
+                        {
+                            <i class="bi bi-arrow-repeat me-1"></i>
+                            <span>Sincronizar Catálogo de BD al Glosario</span>
+                        }
+                    </button>
+                    <button class="btn btn-corporate btn-sm" @onclick="() => ShowAddGlossaryForm = !ShowAddGlossaryForm">
+                        <i class="bi bi-plus-lg me-1"></i>@(ShowAddGlossaryForm ? "Cerrar Formulario" : "Agregar Nuevo Campo")
+                    </button>
+                </div>
+            </div>
+
+            @if (ShowAddGlossaryForm)
+            {
+                <div class="card p-3 mb-4 border bg-light shadow-sm">
+                    <h6 class="fw-bold mb-3" style="color: #1B365D;">Registrar Nuevo Campo en el Glosario Maestro</h6>
+                    <div class="row g-3">
+                        <div class="col-md-2">
+                            <label class="form-label small fw-semibold text-secondary">Esquema</label>
+                            <input type="text" class="form-control form-control-sm" placeholder="ej. dbo" @bind="NewGlossaryItem.Esquema" />
+                        </div>
+                        <div class="col-md-3">
+                            <label class="form-label small fw-semibold text-secondary">Tabla a la que pertenece</label>
+                            <input type="text" class="form-control form-control-sm" placeholder="ej. General o DimAccount" @bind="NewGlossaryItem.Tabla" />
+                            <div class="form-text small" style="font-size: 0.72rem;">Use 'General' para reglas que apliquen a todas las tablas.</div>
+                        </div>
+                        <div class="col-md-3">
+                            <label class="form-label small fw-semibold text-secondary">Nombre de Campo <span class="text-danger">*</span></label>
+                            <input type="text" class="form-control form-control-sm font-monospace" placeholder="ej. AccountKey o Autor" @bind="NewGlossaryItem.Campo" />
+                        </div>
+                        <div class="col-md-2">
+                            <label class="form-label small fw-semibold text-secondary">Tipo de Dato</label>
+                            <input type="text" class="form-control form-control-sm font-monospace" placeholder="ej. int, nvarchar" @bind="NewGlossaryItem.Tipo" />
+                        </div>
+                        <div class="col-md-2">
+                            <label class="form-label small fw-semibold text-secondary">Longitud</label>
+                            <input type="text" class="form-control form-control-sm font-monospace" placeholder="ej. 50, 4, MAX" @bind="NewGlossaryItem.Long" />
+                        </div>
+                        <div class="col-md-10">
+                            <label class="form-label small fw-semibold text-secondary">Descripción Técnica / Negocio <span class="text-danger">*</span></label>
+                            <input type="text" class="form-control form-control-sm" placeholder="Descripción formal y detallada para este campo..." @bind="NewGlossaryItem.Descripcion" />
+                        </div>
+                        <div class="col-md-2 d-flex align-items-end">
+                            <button class="btn btn-success btn-sm w-100 fw-bold shadow-sm" @onclick="SaveNewGlossaryItemAsync">
+                                <i class="bi bi-check-lg me-1"></i>Guardar en BD
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            }
+
+            <!-- Barra de búsqueda y métricas del Glosario -->
+            <div class="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-3">
+                <div class="input-group input-group-sm" style="max-width: 450px;">
+                    <span class="input-group-text bg-white text-muted border-end-0"><i class="bi bi-search"></i></span>
+                    <input type="text" class="form-control border-start-0" 
+                           placeholder="Filtrar por tabla, campo, tipo o descripción..." 
+                           @bind="GlossaryFilterText" 
+                           @bind:event="oninput" />
+                    @if (!string.IsNullOrWhiteSpace(GlossaryFilterText))
+                    {
+                        <button class="btn btn-outline-secondary" @onclick="() => GlossaryFilterText = string.Empty">
+                            <i class="bi bi-x"></i>
+                        </button>
+                    }
+                </div>
+                <div class="small text-muted">
+                    Mostrando <strong>@FilteredGlossaryItems.Count</strong> de <strong>@MasterGlossary.Count</strong> términos registrados
+                </div>
+            </div>
+
+            <!-- Tabla del Glosario Maestro -->
+            <div class="table-responsive border rounded bg-white shadow-sm" style="max-height: 520px; overflow-y: auto;">
+                <table class="table table-hover align-middle mb-0" style="font-size: 0.88rem;">
+                    <thead class="table-light text-secondary sticky-top">
+                        <tr>
+                            <th style="width: 22%;">Tabla (Pertenece a)</th>
+                            <th style="width: 18%;">Campo</th>
+                            <th style="width: 12%;">Tipo</th>
+                            <th style="width: 8%;">Long</th>
+                            <th style="width: 30%;">Descripción</th>
+                            <th style="width: 10%;" class="text-center">Tipo Regla</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @if (FilteredGlossaryItems.Count == 0)
+                        {
+                            <tr>
+                                <td colspan="6" class="text-center py-4 text-muted">
+                                    <em>No se encontraron términos coincidentes en el Glosario Maestro.</em>
+                                </td>
+                            </tr>
+                        }
+                        else
+                        {
+                            @foreach (var item in FilteredGlossaryItems)
+                            {
+                                <tr>
+                                    <td>
+                                        @if (item.Tabla.Equals("General", StringComparison.OrdinalIgnoreCase))
+                                        {
+                                            <span class="badge bg-secondary-subtle text-secondary border">Todas las Tablas (General)</span>
+                                        }
+                                        else
+                                        {
+                                            <span class="fw-semibold text-dark">
+                                                <i class="bi bi-table text-primary me-1"></i>@item.FullTableName
+                                            </span>
+                                        }
+                                    </td>
+                                    <td>
+                                        <span class="font-monospace fw-bold text-primary">@item.Campo</span>
+                                    </td>
+                                    <td>
+                                        <span class="badge bg-light text-dark border font-monospace">
+                                            @(string.IsNullOrWhiteSpace(item.Tipo) ? "-" : item.Tipo)
+                                        </span>
+                                    </td>
+                                    <td>
+                                        <span class="text-muted small font-monospace">
+                                            @(string.IsNullOrWhiteSpace(item.Long) ? "-" : item.Long)
+                                        </span>
+                                    </td>
+                                    <td>
+                                        <span class="small">@item.Descripcion</span>
+                                    </td>
+                                    <td class="text-center">
+                                        @if (item.EsReglaFija)
+                                        {
+                                            <span class="badge bg-primary-subtle text-primary border border-primary-subtle">Regla Base</span>
+                                        }
+                                        else
+                                        {
+                                            <span class="badge bg-success-subtle text-success border border-success-subtle">Catálogo BD</span>
+                                        }
+                                    </td>
+                                </tr>
+                            }
+                        }
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    }
+
+    <!-- ========================================================================= -->
+    <!-- MODAL INTERACTIVO: JUSTIFICACIÓN DE CAMPO ELIMINADO -->
+    <!-- ========================================================================= -->
+    @if (SelectedDriftToJustify != null)
+    {
+        <div class="modal fade show d-block" tabindex="-1" style="background-color: rgba(15, 23, 42, 0.6); backdrop-filter: blur(2px);">
+            <div class="modal-dialog modal-dialog-centered modal-lg">
+                <div class="modal-content shadow-lg border-0 rounded-3">
+                    <div class="modal-header bg-danger text-white py-3">
+                        <h5 class="modal-title fw-bold">
+                            <i class="bi bi-exclamation-triangle-fill me-2"></i>Justificación de Campo Eliminado / Deprecado
+                        </h5>
+                        <button type="button" class="btn-close btn-close-white" @onclick="CloseJustifyModal"></button>
+                    </div>
+                    <div class="modal-body p-4">
+                        <div class="p-3 bg-light rounded border mb-3">
+                            <div class="row g-2">
+                                <div class="col-sm-6">
+                                    <div class="small text-muted">Esquema y Tabla:</div>
+                                    <div class="fw-bold text-dark">@SelectedDriftToJustify.FullTableName</div>
+                                </div>
+                                <div class="col-sm-6">
+                                    <div class="small text-muted">Campo Eliminado:</div>
+                                    <div class="fw-bold text-danger font-monospace fs-5">@SelectedDriftToJustify.Campo</div>
+                                </div>
+                                <div class="col-sm-6">
+                                    <div class="small text-muted">Tipo Original:</div>
+                                    <div class="font-monospace text-secondary">@SelectedDriftToJustify.TipoDato (@SelectedDriftToJustify.Longitud)</div>
+                                </div>
+                                <div class="col-sm-6">
+                                    <div class="small text-muted">Última Descripción Registrada:</div>
+                                    <div class="small text-secondary">@(string.IsNullOrWhiteSpace(SelectedDriftToJustify.UltimaDescripcion) ? "Sin descripción registrada" : SelectedDriftToJustify.UltimaDescripcion)</div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="mb-3">
+                            <label class="form-label small fw-bold text-dark">
+                                Motivo / Razón de la Eliminación <span class="text-danger">*</span>
+                            </label>
+                            <textarea class="form-control" rows="3" 
+                                      placeholder="Explique detalladamente por qué se eliminó o reemplazó este campo (ej. Reemplazado por nueva tabla de direcciones, deprecado por normativa contable...)"
+                                      @bind="JustificationModel.MotivoEliminacion"></textarea>
+                            <div class="form-text small">Este texto aparecerá formalmente en el Historial del Diccionario de Datos Word (.docx).</div>
+                        </div>
+
+                        <div class="mb-2">
+                            <label class="form-label small fw-bold text-dark">Ticket de Cambio / Usuario Responsable</label>
+                            <div class="input-group">
+                                <span class="input-group-text bg-light text-muted"><i class="bi bi-person-badge"></i></span>
+                                <input type="text" class="form-control" placeholder="ej. JIRA-4251 / j.estrella" @bind="JustificationModel.UsuarioResponsable" />
+                            </div>
+                        </div>
+                    </div>
+                    <div class="modal-footer bg-light py-2 px-4">
+                        <button type="button" class="btn btn-outline-secondary btn-sm px-3" @onclick="CloseJustifyModal">Cancelar</button>
+                        <button type="button" class="btn btn-danger btn-sm px-4 fw-bold" @onclick="SaveFieldJustificationAsync">
+                            <i class="bi bi-save me-1"></i>Guardar Justificación en BD
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    }
+
+    <!-- ========================================================================= -->
+    <!-- MODAL INTERACTIVO: APROBACIÓN DE MODIFICACIÓN ESTRUCTURAL -->
+    <!-- ========================================================================= -->
+    @if (SelectedDriftToApprove != null)
+    {
+        <div class="modal fade show d-block" tabindex="-1" style="background-color: rgba(15, 23, 42, 0.6); backdrop-filter: blur(2px);">
+            <div class="modal-dialog modal-dialog-centered modal-lg">
+                <div class="modal-content shadow-lg border-0 rounded-3">
+                    <div class="modal-header @(SelectedDriftToApprove.IsTruncationRisk ? "bg-danger text-white" : "bg-dark text-white") py-3">
+                        <h5 class="modal-title fw-bold">
+                            @if (SelectedDriftToApprove.IsTruncationRisk)
+                            {
+                                <i class="bi bi-exclamation-octagon-fill me-2"></i><span>Aprobar Modificación con Riesgo de Truncamiento</span>
+                            }
+                            else
+                            {
+                                <i class="bi bi-arrow-repeat me-2"></i><span>Aprobar Modificación Estructural de Esquema</span>
+                            }
+                        </h5>
+                        <button type="button" class="btn-close btn-close-white" @onclick="CloseApproveModal"></button>
+                    </div>
+                    <div class="modal-body p-4">
+                        @if (!string.IsNullOrEmpty(ErrorMessage))
+                        {
+                            <div class="alert alert-danger py-2 small mb-3">
+                                <i class="bi bi-exclamation-circle me-1"></i>@ErrorMessage
+                            </div>
+                        }
+
+                        @if (SelectedDriftToApprove.IsTruncationRisk)
+                        {
+                            <div class="alert alert-danger border border-danger d-flex align-items-start gap-2 mb-3">
+                                <i class="bi bi-exclamation-triangle-fill fs-4 flex-shrink-0 text-danger mt-1"></i>
+                                <div>
+                                    <strong class="d-block text-danger">⚠️ ADVERTENCIA CRÍTICA: RIESGO DE TRUNCAMIENTO DE DATOS</strong>
+                                    <span class="small">
+                                        La longitud física de la columna se ha reducido de <strong>@SelectedDriftToApprove.ValorAnterior</strong> a <strong>@SelectedDriftToApprove.ValorNuevo</strong>. 
+                                        Los registros existentes en SQL Server que excedan esta nueva longitud podrían quedar truncados o provocar fallas en inserciones. Requiere justificación técnica formal antes de sincronizar el snapshot.
+                                    </span>
+                                </div>
+                            </div>
+                        }
+
+                        <div class="p-3 bg-light rounded border mb-3">
+                            <div class="row g-2">
+                                <div class="col-sm-6">
+                                    <div class="small text-muted">Esquema y Tabla:</div>
+                                    <div class="fw-bold text-dark">@SelectedDriftToApprove.FullTableName</div>
+                                </div>
+                                <div class="col-sm-6">
+                                    <div class="small text-muted">Campo Afectado:</div>
+                                    <div class="fw-bold font-monospace fs-5 text-primary">@SelectedDriftToApprove.Campo</div>
+                                </div>
+                                <div class="col-sm-6">
+                                    <div class="small text-muted">Propiedad Modificada:</div>
+                                    <div class="fw-bold text-secondary">@SelectedDriftToApprove.PropiedadModificada</div>
+                                </div>
+                                <div class="col-sm-6">
+                                    <div class="small text-muted">Cambio Detectado:</div>
+                                    <div>
+                                        <span class="badge bg-danger-subtle text-danger border">@SelectedDriftToApprove.ValorAnterior</span>
+                                        <i class="bi bi-arrow-right mx-1 text-muted"></i>
+                                        <span class="badge bg-success text-white">@SelectedDriftToApprove.ValorNuevo</span>
+                                    </div>
+                                </div>
+                                <div class="col-sm-6">
+                                    <div class="small text-muted">Control de Versión:</div>
+                                    <div class="small">
+                                        Versión actual: <span class="badge bg-secondary">v@(SelectedDriftToApprove.VersionActual)</span> 
+                                        &rarr; Nueva versión: <span class="badge bg-primary">v@(SelectedDriftToApprove.VersionActual + 1)</span>
+                                    </div>
+                                </div>
+                                <div class="col-sm-6">
+                                    <div class="small text-muted">Auditoría Original:</div>
+                                    <div class="small text-muted">Creado el @SelectedDriftToApprove.FechaCreacion.ToString("yyyy-MM-dd") por @SelectedDriftToApprove.CreadoPor</div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="mb-3">
+                            <label class="form-label small fw-bold text-dark">
+                                Motivo / Justificación del Cambio Estructural <span class="text-danger">*</span>
+                            </label>
+                            <textarea class="form-control" rows="3" 
+                                      placeholder="Explique el motivo del cambio en tipo de dato o reducción/ampliación de longitud (ej. Normalización de formato según requerimiento RFC-810...)"
+                                      @bind="ApprovalMotivo"></textarea>
+                            <div class="form-text small">Esta justificación quedará auditada de forma permanente en <code>dbo.Diccionario_Historial_Versiones</code> y se incluirá en el reporte Word (.docx).</div>
+                        </div>
+
+                        <div class="mb-2">
+                            <label class="form-label small fw-bold text-dark">Ticket de Cambio / Usuario Responsable</label>
+                            <div class="input-group">
+                                <span class="input-group-text bg-light text-muted"><i class="bi bi-person-badge"></i></span>
+                                <input type="text" class="form-control" placeholder="ej. RFC-1049 / j.estrella" @bind="ApprovalUsuario" />
+                            </div>
+                        </div>
+                    </div>
+                    <div class="modal-footer bg-light py-2 px-4">
+                        <button type="button" class="btn btn-outline-secondary btn-sm px-3" @onclick="CloseApproveModal" disabled="@IsApprovingModification">Cancelar</button>
+                        <button type="button" class="btn @(SelectedDriftToApprove.IsTruncationRisk ? "btn-danger" : "btn-primary") btn-sm px-4 fw-bold" @onclick="ApproveModificationAsync" disabled="@IsApprovingModification">
+                            @if (IsApprovingModification)
+                            {
+                                <span class="spinner-border spinner-border-sm me-1"></span>
+                                <span>Aprobando y Actualizando Snapshot...</span>
+                            }
+                            else
+                            {
+                                <i class="bi bi-check-circle-fill me-1"></i>
+                                <span>Aprobar y Registrar Versión v@(SelectedDriftToApprove.VersionActual + 1)</span>
+                            }
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    }
+
+    <!-- ========================================================================= -->
+    <!-- MODAL INTERACTIVO: LÍNEA DE TIEMPO / HISTORIAL DE VERSIONES POR CAMPO -->
+    <!-- ========================================================================= -->
+    @if (SelectedFieldForHistory != null)
+    {
+        <div class="modal fade show d-block" tabindex="-1" style="background-color: rgba(15, 23, 42, 0.6); backdrop-filter: blur(2px);">
+            <div class="modal-dialog modal-dialog-centered modal-lg">
+                <div class="modal-content shadow-lg border-0 rounded-3">
+                    <div class="modal-header bg-primary text-white py-3">
+                        <h5 class="modal-title fw-bold">
+                            <i class="bi bi-clock-history me-2"></i>Historial de Versiones: @SelectedFieldForHistory.FullTableName . @SelectedFieldForHistory.Campo
+                        </h5>
+                        <button type="button" class="btn-close btn-close-white" @onclick="CloseFieldHistoryModal"></button>
+                    </div>
+                    <div class="modal-body p-4">
+                        <div class="p-3 bg-light rounded border mb-3">
+                            <div class="row g-2">
+                                <div class="col-sm-6">
+                                    <div class="small text-muted">Esquema y Tabla:</div>
+                                    <div class="fw-bold text-dark">@SelectedFieldForHistory.FullTableName</div>
+                                </div>
+                                <div class="col-sm-6">
+                                    <div class="small text-muted">Campo:</div>
+                                    <div class="fw-bold text-primary font-monospace fs-5">@SelectedFieldForHistory.Campo</div>
+                                </div>
+                                <div class="col-sm-6">
+                                    <div class="small text-muted">Versión en Snapshot:</div>
+                                    <span class="badge bg-primary">v@SelectedFieldForHistory.VersionActual</span>
+                                    <span class="small text-muted ms-1">(Creado: @SelectedFieldForHistory.FechaCreacion.ToString("yyyy-MM-dd") por @SelectedFieldForHistory.CreadoPor)</span>
+                                </div>
+                                <div class="col-sm-6">
+                                    <div class="small text-muted">Estado Actual Físico:</div>
+                                    <span class="font-monospace text-secondary">@SelectedFieldForHistory.TipoDato (@SelectedFieldForHistory.Longitud)</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        @if (IsLoadingFieldHistory)
+                        {
+                            <div class="text-center py-4">
+                                <div class="spinner-border text-primary spinner-border-sm me-2" role="status"></div>
+                                <span class="text-muted">Consultando historial en dbo.Diccionario_Historial_Versiones...</span>
+                            </div>
+                        }
+                        else if (CurrentFieldHistory.Count == 0)
+                        {
+                            <div class="alert alert-light border text-muted small text-center py-4">
+                                <i class="bi bi-info-circle fs-3 d-block text-secondary mb-2"></i>
+                                No se registran modificaciones estructurales previas para este campo en <code>dbo.Diccionario_Historial_Versiones</code>.<br />
+                                El campo se conserva en su versión base <strong>v@SelectedFieldForHistory.VersionActual</strong>.
+                            </div>
+                        }
+                        else
+                        {
+                            <div class="table-responsive border rounded bg-white">
+                                <table class="table table-hover align-middle mb-0" style="font-size: 0.88rem;">
+                                    <thead class="table-light text-secondary">
+                                        <tr>
+                                            <th style="width: 20%;">Fecha</th>
+                                            <th style="width: 15%;">Usuario</th>
+                                            <th style="width: 15%;">Propiedad</th>
+                                            <th style="width: 25%;">Cambio</th>
+                                            <th style="width: 25%;">Motivo del Cambio</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        @foreach (var v in CurrentFieldHistory)
+                                        {
+                                            <tr>
+                                                <td><span class="small text-muted">@v.FechaCambio.ToString("yyyy-MM-dd HH:mm")</span></td>
+                                                <td><span class="badge bg-light text-dark border">@v.UsuarioResponsable</span></td>
+                                                <td><span class="fw-semibold">@v.PropiedadModificada</span></td>
+                                                <td>
+                                                    <span class="text-danger font-monospace small">@v.ValorAnterior</span>
+                                                    <i class="bi bi-arrow-right mx-1 text-muted"></i>
+                                                    <span class="text-success font-monospace small fw-bold">@v.ValorNuevo</span>
+                                                </td>
+                                                <td><span class="small">@v.MotivoCambio</span></td>
+                                            </tr>
+                                        }
+                                    </tbody>
+                                </table>
+                            </div>
+                        }
+                    </div>
+                    <div class="modal-footer bg-light py-2 px-4">
+                        <button type="button" class="btn btn-outline-secondary btn-sm px-4" @onclick="CloseFieldHistoryModal">Cerrar</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    }
+</div>
+
+@code {
+    private string ActiveTab { get; set; } = "generator";
+
+    private ConnectionModel Connection { get; set; } = new();
+    private CustomizationModel Customization { get; set; } = new();
+
+    private List<DatabaseItem> Databases { get; set; } = new();
+    private string? SelectedDatabase { get; set; }
+    private List<SchemaGroupSelection> SchemaGroups { get; set; } = new();
+
+    private string SearchFilter { get; set; } = string.Empty;
+
+    private bool IsConnecting { get; set; } = false;
+    private bool IsLoadingTables { get; set; } = false;
+    private bool IsGenerating { get; set; } = false;
+
+    private string? ServerInfo { get; set; }
+    private string? ErrorMessage { get; set; }
+    private string? SuccessMessage { get; set; }
+
+    private string ProgressPhase { get; set; } = "Iniciando proceso...";
+    private string ProgressDetail { get; set; } = "";
+    private int ProgressPercent { get; set; } = 15;
+
+    // Asistente Inteligente y Auditoría
+    private DatabaseDictionary? AuditDictionary { get; set; }
+    private List<GlossaryItem> MasterGlossary { get; set; } = new();
+    private bool IsLoadingAudit { get; set; } = false;
+    private bool IsSavingToDb { get; set; } = false;
+    private string AuditFilterText { get; set; } = string.Empty;
+    private string AuditStatusFilter { get; set; } = "ALL";
+
+    // Auditoría de Esquema / Drift y Deprecados
+    private bool HasActiveSnapshot { get; set; } = false;
+    private DateTime? SnapshotDate { get; set; }
+    private int SnapshotColumnCount { get; set; } = 0;
+    private bool IsTakingSnapshot { get; set; } = false;
+    private bool IsCheckingDrift { get; set; } = false;
+    private List<SchemaDriftItem> DriftAlerts { get; set; } = new();
+    private List<DeprecatedFieldItem> DeprecatedHistory { get; set; } = new();
+    private List<ColumnVersionHistoryItem> VersionHistoryList { get; set; } = new();
+
+    // Modal Justificación
+    private SchemaDriftItem? SelectedDriftToJustify { get; set; }
+    private DeprecatedFieldItem JustificationModel { get; set; } = new();
+
+    // Modal Aprobación de Modificación
+    private SchemaDriftItem? SelectedDriftToApprove { get; set; }
+    private string ApprovalMotivo { get; set; } = string.Empty;
+    private string ApprovalUsuario { get; set; } = string.Empty;
+    private bool IsApprovingModification { get; set; } = false;
+
+    // Modal Historial de Versiones por Campo
+    private SchemaDriftItem? SelectedFieldForHistory { get; set; }
+    private List<ColumnVersionHistoryItem> CurrentFieldHistory { get; set; } = new();
+    private bool IsLoadingFieldHistory { get; set; } = false;
+
+    // Glosario
+    private bool ShowAddGlossaryForm { get; set; } = false;
+    private GlossaryItem NewGlossaryItem { get; set; } = new();
+
+    private int SelectedTableCount => SchemaGroups.Sum(g => g.Tables.Count(t => t.IsSelected));
+    private int TotalTableCount => SchemaGroups.Sum(g => g.Tables.Count);
+
+    // Contadores auditoría
+    private int CountDocumented => AuditDictionary?.Schemas.Sum(s => s.Tables.Sum(t => t.Columns.Count(c => c.HasExistingDescription))) ?? 0;
+    private int CountGlossary => AuditDictionary?.Schemas.Sum(s => s.Tables.Sum(t => t.Columns.Count(c => !c.HasExistingDescription && c.SuggestionSource == SuggestionSourceType.MasterGlossary))) ?? 0;
+    private int CountFK => AuditDictionary?.Schemas.Sum(s => s.Tables.Sum(t => t.Columns.Count(c => !c.HasExistingDescription && c.SuggestionSource == SuggestionSourceType.ForeignKeyReference))) ?? 0;
+    private int CountSemantic => AuditDictionary?.Schemas.Sum(s => s.Tables.Sum(t => t.Columns.Count(c => !c.HasExistingDescription && c.SuggestionSource == SuggestionSourceType.SemanticReuse))) ?? 0;
+    private int CountInferred => AuditDictionary?.Schemas.Sum(s => s.Tables.Sum(t => t.Columns.Count(c => !c.HasExistingDescription && c.SuggestionSource == SuggestionSourceType.PatternInference))) ?? 0;
+    private int CountGlossaryAndSemantic => CountGlossary + CountSemantic + CountFK;
+
+    // Contadores Drift
+    private int CountDeletedDrift => DriftAlerts.Count(d => d.DriftType == SchemaDriftType.DeletedFromDatabase);
+    private int CountUnjustifiedDeleted => DriftAlerts.Count(d => d.DriftType == SchemaDriftType.DeletedFromDatabase && !d.IsJustified);
+    private int CountNewDrift => DriftAlerts.Count(d => d.DriftType == SchemaDriftType.NewInDatabase);
+    private int CountModifiedDrift => DriftAlerts.Count(d => d.DriftType == SchemaDriftType.ModifiedInDatabase);
+    private int CountTruncationRisks => DriftAlerts.Count(d => d.DriftType == SchemaDriftType.ModifiedInDatabase && d.IsTruncationRisk);
+
+    private int PercentDocumented
+    {
+        get
+        {
+            if (AuditDictionary == null || AuditDictionary.TotalColumns == 0) return 0;
+            return (int)Math.Round((double)CountDocumented / AuditDictionary.TotalColumns * 100.0);
+        }
+    }
+
+    private List<SchemaGroupSelection> FilteredSchemaGroups
+    {
+        get
+        {
+            if (string.IsNullOrWhiteSpace(SearchFilter))
+            {
+                return SchemaGroups;
+            }
+
+            var query = SearchFilter.Trim();
+            var list = new List<SchemaGroupSelection>();
+
+            foreach (var group in SchemaGroups)
+            {
+                bool schemaMatches = group.SchemaName.Contains(query, StringComparison.OrdinalIgnoreCase);
+                var matchingTables = group.Tables
+                    .Where(t => schemaMatches || t.TableName.Contains(query, StringComparison.OrdinalIgnoreCase))
+                    .ToList();
+
+                if (matchingTables.Count > 0)
+                {
+                    list.Add(new SchemaGroupSelection
+                    {
+                        SchemaName = group.SchemaName,
+                        Tables = matchingTables
+                    });
+                }
+            }
+
+            return list;
+        }
+    }
+
+    protected override void OnInitialized()
+    {
+        Connection.Server = @"NP26-SOPORTE\SQLEXPRESS";
+        Customization.InstitutionTitle = "Departamento de Tecnología de la Información";
+        Customization.DocumentTitle = "Diccionario de Datos";
+        Customization.PrimaryColorHex = "#1B365D";
+        JustificationModel.UsuarioResponsable = Environment.UserName;
+    }
+
+    // Maneja el cambio de modo de autenticación de forma explícita
+    // (evita bug de Blazor donde @bind en bool + @if en mismo bloque causa flicker)
+    private void OnAuthModeChanged(ChangeEventArgs e)
+    {
+        Connection.UseWindowsAuth = e.Value?.ToString() == "windows";
+    }
+
+    private async Task ConnectAndFetchDatabases()
+    {
+        ErrorMessage = null;
+        SuccessMessage = null;
+        IsConnecting = true;
+        ServerInfo = null;
+
+        try
+        {
+            var (success, msg, version) = await DiscoveryService.TestConnectionAsync(Connection);
+            if (!success)
+            {
+                ErrorMessage = msg;
+                return;
+            }
+
+            ServerInfo = $"{msg}";
+            Databases = await DiscoveryService.GetDatabasesAsync(Connection);
+            SchemaGroups.Clear();
+            SelectedDatabase = null;
+            AuditDictionary = null;
+            DriftAlerts.Clear();
+
+            if (Databases.Count == 0)
+            {
+                ErrorMessage = "Conectado al servidor, pero no se encontraron bases de datos de usuario con permisos de lectura.";
+            }
+            else
+            {
+                SuccessMessage = $"Conexión establecida. {Databases.Count} bases de datos de usuario detectadas.";
+            }
+        }
+        catch (Exception ex)
+        {
+            ErrorMessage = $"Error al conectar con SQL Server: {ex.Message}";
+        }
+        finally
+        {
+            IsConnecting = false;
+        }
+    }
+
+    private async Task OnDatabaseSelected(ChangeEventArgs e)
+    {
+        SelectedDatabase = e.Value?.ToString();
+        SchemaGroups.Clear();
+        ErrorMessage = null;
+        SuccessMessage = null;
+        SearchFilter = string.Empty;
+        AuditDictionary = null;
+        DriftAlerts.Clear();
+
+        if (string.IsNullOrWhiteSpace(SelectedDatabase))
+        {
+            return;
+        }
+
+        Customization.DocumentTitle = $"Diccionario de Datos de la Base de Datos {SelectedDatabase}";
+        IsLoadingTables = true;
+
+        try
+        {
+            SchemaGroups = await DiscoveryService.GetTablesForDatabaseAsync(Connection, SelectedDatabase);
+            SuccessMessage = $"Catálogo de '{SelectedDatabase}' cargado: {TotalTableCount} tablas en {SchemaGroups.Count} esquemas.";
+
+            // Asegurar que las tablas de auditoría y versiones existan de inmediato en la BD seleccionada
+            await DriftService.EnsureAuditTablesExistAsync(Connection, SelectedDatabase);
+
+            // Cargar estado de snapshot, glosario, historial de deprecados y versiones
+            var (exists, date, cols) = await DriftService.GetSnapshotInfoAsync(Connection, SelectedDatabase);
+            HasActiveSnapshot = exists;
+            SnapshotDate = date;
+            SnapshotColumnCount = cols;
+
+            // Si no existe snapshot previo o está vacío, registrar línea base automáticamente
+            if (!HasActiveSnapshot || SnapshotColumnCount == 0)
+            {
+                var allTableNames = SchemaGroups.SelectMany(g => g.Tables).Select(t => t.FullName).ToList();
+                if (allTableNames.Count > 0)
+                {
+                    var meta = await ExtractionService.ExtractEnrichedMetadataAsync(Connection, SelectedDatabase, allTableNames);
+                    var tList = meta.Schemas.SelectMany(s => s.Tables).ToList();
+                    SnapshotColumnCount = await DriftService.TakeSnapshotAsync(Connection, SelectedDatabase, tList);
+                    HasActiveSnapshot = true;
+                    SnapshotDate = DateTime.Now;
+                }
+            }
+
+            DeprecatedHistory = await DriftService.GetDeprecatedFieldsAsync(Connection, SelectedDatabase);
+            VersionHistoryList = await DriftService.GetAllVersionHistoryAsync(Connection, SelectedDatabase);
+            MasterGlossary = await IntelligentService.GetGlossaryItemsAsync(Connection, SelectedDatabase);
+
+            // Ejecutar comparación automática contra snapshot para detectar cambios inmediatamente
+            await CheckSchemaDriftAsync();
+        }
+        catch (Exception ex)
+        {
+            ErrorMessage = $"Error al consultar catálogo de '{SelectedDatabase}': {ex.Message}";
+        }
+        finally
+        {
+            IsLoadingTables = false;
+            // Update navbar connection indicator
+            await JS.InvokeVoidAsync("setNavDbStatus", SelectedDatabase, !string.IsNullOrEmpty(SelectedDatabase));
+        }
+    }
+
+    private void SetAllTables(bool selected)
+    {
+        foreach (var group in SchemaGroups)
+        {
+            foreach (var table in group.Tables)
+            {
+                table.IsSelected = selected;
+            }
+        }
+    }
+
+    private async Task SwitchToAssistantTab()
+    {
+        ActiveTab = "assistant";
+        if (AuditDictionary == null && !string.IsNullOrWhiteSpace(SelectedDatabase))
+        {
+            await LoadAuditDataAsync();
+        }
+    }
+
+    private async Task SwitchToDriftTab()
+    {
+        ActiveTab = "drift";
+        if (!string.IsNullOrWhiteSpace(SelectedDatabase))
+        {
+            var (exists, date, cols) = await DriftService.GetSnapshotInfoAsync(Connection, SelectedDatabase);
+            HasActiveSnapshot = exists;
+            SnapshotDate = date;
+            SnapshotColumnCount = cols;
+            DeprecatedHistory = await DriftService.GetDeprecatedFieldsAsync(Connection, SelectedDatabase);
+            VersionHistoryList = await DriftService.GetAllVersionHistoryAsync(Connection, SelectedDatabase);
+
+            if (HasActiveSnapshot)
+            {
+                await CheckSchemaDriftAsync();
+            }
+        }
+    }
+
+    private async Task SwitchToGlossaryTab()
+    {
+        ActiveTab = "glossary";
+        if (!string.IsNullOrWhiteSpace(SelectedDatabase))
+        {
+            MasterGlossary = await IntelligentService.GetGlossaryItemsAsync(Connection, SelectedDatabase);
+        }
+    }
+
+    private async Task LoadAuditDataAsync()
+    {
+        if (string.IsNullOrWhiteSpace(SelectedDatabase))
+        {
+            ErrorMessage = "Debe conectarse y seleccionar una base de datos primero.";
+            return;
+        }
+
+        var selectedTables = SchemaGroups
+            .SelectMany(g => g.Tables)
+            .Where(t => t.IsSelected)
+            .Select(t => t.FullName)
+            .ToList();
+
+        if (selectedTables.Count == 0)
+        {
+            selectedTables = SchemaGroups
+                .SelectMany(g => g.Tables)
+                .Select(t => t.FullName)
+                .ToList();
+        }
+
+        if (selectedTables.Count == 0)
+        {
+            ErrorMessage = "No hay tablas disponibles en la base de datos para auditar.";
+            return;
+        }
+
+        IsLoadingAudit = true;
+        ErrorMessage = null;
+        SuccessMessage = null;
+
+        try
+        {
+            MasterGlossary = await IntelligentService.GetGlossaryItemsAsync(Connection, SelectedDatabase);
+            AuditDictionary = await ExtractionService.ExtractEnrichedMetadataAsync(Connection, SelectedDatabase, selectedTables);
+            IntelligentService.EnrichWithSuggestions(AuditDictionary, MasterGlossary);
+
+            SuccessMessage = $"Auditoría completada para '{SelectedDatabase}': {AuditDictionary.TotalColumns} columnas evaluadas ({CountDocumented} documentadas, {AuditDictionary.TotalUndocumentedColumns} sugeridas).";
+        }
+        catch (Exception ex)
+        {
+            ErrorMessage = $"Error durante la auditoría de metadatos: {ex.Message}";
+        }
+        finally
+        {
+            IsLoadingAudit = false;
+        }
+    }
+
+    private void ApplyAllSuggestions()
+    {
+        if (AuditDictionary == null) return;
+
+        int count = 0;
+        foreach (var schema in AuditDictionary.Schemas)
+        {
+            foreach (var table in schema.Tables)
+            {
+                if (!table.HasExistingDescription && !string.IsNullOrWhiteSpace(table.SuggestedDescription))
+                {
+                    table.EditableDescription = table.SuggestedDescription;
+                    table.IsDirty = true;
+                    count++;
+                }
+
+                foreach (var col in table.Columns)
+                {
+                    if (!col.HasExistingDescription && !string.IsNullOrWhiteSpace(col.SuggestedDescription))
+                    {
+                        col.EditableDescription = col.SuggestedDescription;
+                        col.IsDirty = true;
+                        count++;
+                    }
+                }
+            }
+        }
+
+        SuccessMessage = $"Se aplicaron las sugerencias inteligentes a {count} elementos indocumentados en memoria. Pulse 'Guardar Descripciones en BD' para fijarlas en SQL Server.";
+    }
+
+    private async Task SaveDescriptionsToDatabaseAsync()
+    {
+        if (AuditDictionary == null || string.IsNullOrWhiteSpace(SelectedDatabase)) return;
+
+        IsSavingToDb = true;
+        ErrorMessage = null;
+        SuccessMessage = null;
+
+        try
+        {
+            var tablesToSave = AuditDictionary.Schemas.SelectMany(s => s.Tables).ToList();
+            var (tablesUpdated, columnsUpdated) = await IntelligentService.SaveDescriptionsToDatabaseAsync(Connection, SelectedDatabase, tablesToSave);
+
+            SuccessMessage = $"¡Metadatos guardados con éxito en SQL Server! Se actualizaron {tablesUpdated} descripciones de tabla y {columnsUpdated} columnas en 'sys.extended_properties'.";
+        }
+        catch (Exception ex)
+        {
+            ErrorMessage = $"Error al guardar descripciones en SQL Server: {ex.Message}";
+        }
+        finally
+        {
+            IsSavingToDb = false;
+        }
+    }
+
+    private async Task TakeSnapshotAsync()
+    {
+        if (string.IsNullOrWhiteSpace(SelectedDatabase)) return;
+
+        var selectedTables = SchemaGroups
+            .SelectMany(g => g.Tables)
+            .Where(t => t.IsSelected)
+            .Select(t => t.FullName)
+            .ToList();
+
+        if (selectedTables.Count == 0)
+        {
+            selectedTables = SchemaGroups
+                .SelectMany(g => g.Tables)
+                .Select(t => t.FullName)
+                .ToList();
+        }
+
+        if (selectedTables.Count == 0)
+        {
+            ErrorMessage = "Debe seleccionar o tener al menos una tabla disponible para registrar el snapshot.";
+            return;
+        }
+
+        IsTakingSnapshot = true;
+        ErrorMessage = null;
+        SuccessMessage = null;
+
+        try
+        {
+            var currentMetadata = await ExtractionService.ExtractEnrichedMetadataAsync(Connection, SelectedDatabase, selectedTables);
+            var tablesList = currentMetadata.Schemas.SelectMany(s => s.Tables).ToList();
+
+            int count = await DriftService.TakeSnapshotAsync(Connection, SelectedDatabase, tablesList);
+            HasActiveSnapshot = true;
+            SnapshotDate = DateTime.Now;
+            SnapshotColumnCount = count;
+
+            SuccessMessage = $"Snapshot de esquema registrado con éxito: {count} columnas guardadas como línea base en 'dbo.Diccionario_Snapshot'.";
+        }
+        catch (Exception ex)
+        {
+            ErrorMessage = $"Error al registrar snapshot: {ex.Message}";
+        }
+        finally
+        {
+            IsTakingSnapshot = false;
+        }
+    }
+
+    private async Task CheckSchemaDriftAsync()
+    {
+        if (string.IsNullOrWhiteSpace(SelectedDatabase)) return;
+
+        var selectedTables = SchemaGroups
+            .SelectMany(g => g.Tables)
+            .Where(t => t.IsSelected)
+            .Select(t => t.FullName)
+            .ToList();
+
+        if (selectedTables.Count == 0)
+        {
+            selectedTables = SchemaGroups
+                .SelectMany(g => g.Tables)
+                .Select(t => t.FullName)
+                .ToList();
+        }
+
+        if (selectedTables.Count == 0)
+        {
+            ErrorMessage = "No hay tablas disponibles en la base de datos para comparar contra el snapshot.";
+            return;
+        }
+
+        IsCheckingDrift = true;
+        ErrorMessage = null;
+        SuccessMessage = null;
+
+        try
+        {
+            var currentMetadata = await ExtractionService.ExtractEnrichedMetadataAsync(Connection, SelectedDatabase, selectedTables);
+            var tablesList = currentMetadata.Schemas.SelectMany(s => s.Tables).ToList();
+
+            DriftAlerts = await DriftService.DetectDriftAsync(Connection, SelectedDatabase, tablesList);
+            DeprecatedHistory = await DriftService.GetDeprecatedFieldsAsync(Connection, SelectedDatabase);
+            VersionHistoryList = await DriftService.GetAllVersionHistoryAsync(Connection, SelectedDatabase);
+
+            if (DriftAlerts.Count == 0)
+            {
+                SuccessMessage = "Auditoría de esquema completada: 0 discrepancias detectadas. El esquema físico coincide exactamente con el Snapshot.";
+            }
+            else
+            {
+                SuccessMessage = $"Auditoría completada: se detectaron {DriftAlerts.Count} diferencias ({CountDeletedDrift} eliminaciones, {CountModifiedDrift} modificaciones, {CountNewDrift} campos nuevos).";
+            }
+        }
+        catch (Exception ex)
+        {
+            ErrorMessage = $"Error al contrastar esquema con snapshot: {ex.Message}";
+        }
+        finally
+        {
+            IsCheckingDrift = false;
+        }
+    }
+
+    private void OpenJustifyModal(SchemaDriftItem drift)
+    {
+        SelectedDriftToJustify = drift;
+        JustificationModel = new DeprecatedFieldItem
+        {
+            Esquema = drift.Esquema,
+            Tabla = drift.Tabla,
+            Campo = drift.Campo,
+            TipoDatoOriginal = drift.TipoDato,
+            LongitudOriginal = drift.Longitud,
+            UltimaDescripcion = drift.UltimaDescripcion,
+            UsuarioResponsable = Environment.UserName,
+            MotivoEliminacion = string.IsNullOrWhiteSpace(drift.Justification?.MotivoEliminacion)
+                ? $"Deprecación y eliminación formal del campo '{drift.Campo}' en la base de datos."
+                : drift.Justification.MotivoEliminacion
+        };
+    }
+
+    private void CloseJustifyModal()
+    {
+        SelectedDriftToJustify = null;
+    }
+
+    private async Task SaveFieldJustificationAsync()
+    {
+        if (SelectedDriftToJustify == null || string.IsNullOrWhiteSpace(SelectedDatabase)) return;
+
+        if (string.IsNullOrWhiteSpace(JustificationModel.MotivoEliminacion))
+        {
+            JustificationModel.MotivoEliminacion = $"Deprecación y eliminación formal del campo '{JustificationModel.Campo}' en la base de datos.";
+        }
+
+        try
+        {
+            await DriftService.JustifyDeletedFieldAsync(Connection, SelectedDatabase, JustificationModel);
+            SuccessMessage = $"Eliminación justificada exitosamente para '{JustificationModel.FullTableName}.{JustificationModel.Campo}'. Registrado en 'dbo.Diccionario_Campos_Deprecados'.";
+
+            CloseJustifyModal();
+
+            // Refrescar drift e historial
+            await CheckSchemaDriftAsync();
+        }
+        catch (Exception ex)
+        {
+            ErrorMessage = $"Error al registrar justificación: {ex.Message}";
+        }
+    }
+
+    private void OpenApproveModal(SchemaDriftItem drift)
+    {
+        SelectedDriftToApprove = drift;
+        ApprovalMotivo = $"Actualización de {drift.PropiedadModificada} aprobada para {drift.FullTableName}.{drift.Campo}.";
+        ApprovalUsuario = Environment.UserName;
+    }
+
+    private void CloseApproveModal()
+    {
+        SelectedDriftToApprove = null;
+    }
+
+    private async Task ApproveModificationAsync()
+    {
+        if (SelectedDriftToApprove == null || string.IsNullOrWhiteSpace(SelectedDatabase)) return;
+
+        if (string.IsNullOrWhiteSpace(ApprovalMotivo))
+        {
+            ApprovalMotivo = $"Actualización de {SelectedDriftToApprove.PropiedadModificada} aprobada y sincronizada con la base de datos.";
+        }
+
+        IsApprovingModification = true;
+        ErrorMessage = null;
+
+        try
+        {
+            await DriftService.ApproveColumnModificationAsync(
+                Connection, 
+                SelectedDatabase, 
+                SelectedDriftToApprove, 
+                ApprovalUsuario, 
+                ApprovalMotivo
+            );
+
+            SuccessMessage = $"Modificación aprobada y registrada exitosamente para '{SelectedDriftToApprove.FullTableName}.{SelectedDriftToApprove.Campo}'. La versión se incrementó a v{SelectedDriftToApprove.VersionActual + 1}.";
+            CloseApproveModal();
+
+            // Refrescar drift e historial
+            await CheckSchemaDriftAsync();
+            MasterGlossary = await IntelligentService.GetGlossaryItemsAsync(Connection, SelectedDatabase);
+            if (AuditDictionary != null)
+            {
+                await LoadAuditDataAsync();
+            }
+        }
+        catch (Exception ex)
+        {
+            ErrorMessage = $"Error al aprobar modificación de esquema: {ex.Message}";
+        }
+        finally
+        {
+            IsApprovingModification = false;
+        }
+    }
+
+    private async Task OpenFieldHistoryModal(SchemaDriftItem drift)
+    {
+        SelectedFieldForHistory = drift;
+        IsLoadingFieldHistory = true;
+        CurrentFieldHistory.Clear();
+
+        try
+        {
+            CurrentFieldHistory = await DriftService.GetColumnVersionHistoryAsync(
+                Connection, 
+                SelectedDatabase!, 
+                drift.Esquema, 
+                drift.Tabla, 
+                drift.Campo
+            );
+        }
+        catch
+        {
+            CurrentFieldHistory = new();
+        }
+        finally
+        {
+            IsLoadingFieldHistory = false;
+        }
+    }
+
+    private void CloseFieldHistoryModal()
+    {
+        SelectedFieldForHistory = null;
+        CurrentFieldHistory.Clear();
+    }
+
+    private string GlossaryFilterText { get; set; } = string.Empty;
+    private bool IsSyncingGlossary { get; set; } = false;
+
+    private List<GlossaryItem> FilteredGlossaryItems
+    {
+        get
+        {
+            if (string.IsNullOrWhiteSpace(GlossaryFilterText)) return MasterGlossary;
+            string f = GlossaryFilterText.Trim();
+            return MasterGlossary.Where(g => 
+                g.Campo.Contains(f, StringComparison.OrdinalIgnoreCase) || 
+                g.Tabla.Contains(f, StringComparison.OrdinalIgnoreCase) ||
+                g.Esquema.Contains(f, StringComparison.OrdinalIgnoreCase) ||
+                g.Descripcion.Contains(f, StringComparison.OrdinalIgnoreCase) ||
+                g.Tipo.Contains(f, StringComparison.OrdinalIgnoreCase)
+            ).ToList();
+        }
+    }
+
+    private async Task SyncCatalogToGlossaryAsync()
+    {
+        if (string.IsNullOrWhiteSpace(SelectedDatabase)) return;
+        IsSyncingGlossary = true;
+        ErrorMessage = null;
+        SuccessMessage = null;
+
+        try
+        {
+            int count = await IntelligentService.SyncCatalogToGlossaryAsync(Connection, SelectedDatabase);
+            MasterGlossary = await IntelligentService.GetGlossaryItemsAsync(Connection, SelectedDatabase);
+            SuccessMessage = $"Catálogo sincronizado exitosamente al Glosario Maestro: {count} registros actualizados/insertados en 'dbo.Diccionario_Glosario_Maestro'.";
+        }
+        catch (Exception ex)
+        {
+            ErrorMessage = $"Error al sincronizar catálogo al glosario: {ex.Message}";
+        }
+        finally
+        {
+            IsSyncingGlossary = false;
+        }
+    }
+
+    private async Task SaveNewGlossaryItemAsync()
+    {
+        if (string.IsNullOrWhiteSpace(NewGlossaryItem.Campo) || string.IsNullOrWhiteSpace(NewGlossaryItem.Descripcion))
+        {
+            ErrorMessage = "El nombre del campo y la descripción son campos obligatorios.";
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(SelectedDatabase))
+        {
+            ErrorMessage = "Seleccione una base de datos para guardar el glosario.";
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(NewGlossaryItem.Tabla))
+        {
+            NewGlossaryItem.Tabla = "General";
+        }
+        if (string.IsNullOrWhiteSpace(NewGlossaryItem.Esquema))
+        {
+            NewGlossaryItem.Esquema = "dbo";
+        }
+
+        try
+        {
+            await IntelligentService.UpsertGlossaryItemAsync(Connection, SelectedDatabase, NewGlossaryItem);
+            MasterGlossary = await IntelligentService.GetGlossaryItemsAsync(Connection, SelectedDatabase);
+            NewGlossaryItem = new GlossaryItem();
+            ShowAddGlossaryForm = false;
+            SuccessMessage = "Término guardado exitosamente en el Glosario Maestro.";
+        }
+        catch (Exception ex)
+        {
+            ErrorMessage = $"Error al guardar término de glosario: {ex.Message}";
+        }
+    }
+
+    private List<ColumnMetadata> GetFilteredColumns(TableMetadata table)
+    {
+        var query = table.Columns.AsEnumerable();
+
+        if (!string.IsNullOrWhiteSpace(AuditFilterText))
+        {
+            string f = AuditFilterText.Trim();
+            query = query.Where(c => c.Name.Contains(f, StringComparison.OrdinalIgnoreCase) || 
+                                     c.EditableDescription.Contains(f, StringComparison.OrdinalIgnoreCase));
+        }
+
+        switch (AuditStatusFilter)
+        {
+            case "UNDOCUMENTED":
+                query = query.Where(c => !c.HasExistingDescription);
+                break;
+            case "GLOSSARY":
+                query = query.Where(c => !c.HasExistingDescription && c.SuggestionSource == SuggestionSourceType.MasterGlossary);
+                break;
+            case "FK":
+                query = query.Where(c => !c.HasExistingDescription && c.SuggestionSource == SuggestionSourceType.ForeignKeyReference);
+                break;
+            case "SEMANTIC":
+                query = query.Where(c => !c.HasExistingDescription && c.SuggestionSource == SuggestionSourceType.SemanticReuse);
+                break;
+            case "INFERRED":
+                query = query.Where(c => !c.HasExistingDescription && c.SuggestionSource == SuggestionSourceType.PatternInference);
+                break;
+        }
+
+        return query.ToList();
+    }
+
+    private async Task HandleLogoUpload(InputFileChangeEventArgs e)
+    {
+        var file = e.File;
+        if (file != null)
+        {
+            try
+            {
+                using var stream = file.OpenReadStream(maxAllowedSize: 5 * 1024 * 1024);
+                using var ms = new MemoryStream();
+                await stream.CopyToAsync(ms);
+
+                Customization.LogoBytes = ms.ToArray();
+                Customization.LogoFileName = file.Name;
+                Customization.LogoContentType = file.ContentType;
+            }
+            catch (Exception ex)
+            {
+                ErrorMessage = $"Error al procesar logotipo: {ex.Message}";
+            }
+        }
+    }
+
+    private void RemoveLogo()
+    {
+        Customization.LogoBytes = null;
+        Customization.LogoFileName = null;
+        Customization.LogoContentType = null;
+    }
+
+    private async Task GenerateAndDownloadDictionary()
+    {
+        if (string.IsNullOrWhiteSpace(SelectedDatabase))
+        {
+            ErrorMessage = "Debe seleccionar una base de datos.";
+            return;
+        }
+
+        var selectedTables = SchemaGroups
+            .SelectMany(g => g.Tables)
+            .Where(t => t.IsSelected)
+            .Select(t => t.FullName)
+            .ToList();
+
+        if (selectedTables.Count == 0)
+        {
+            ErrorMessage = "Debe seleccionar al menos una tabla para documentar.";
+            return;
+        }
+
+        IsGenerating = true;
+        ErrorMessage = null;
+        SuccessMessage = null;
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+
+        try
+        {
+            // Fase 1: Extracción Server-Side con READ UNCOMMITTED
+            ProgressPhase = "Fase 1/3: Extracción de Metadatos SQL Server";
+            ProgressDetail = $"Consultando metadatos y relaciones de {selectedTables.Count} tablas con aislamiento READ UNCOMMITTED...";
+            ProgressPercent = 30;
+            StateHasChanged();
+            await Task.Delay(50);
+
+            var metadata = await ExtractionService.ExtractEnrichedMetadataAsync(Connection, SelectedDatabase, selectedTables);
+
+            // Enriquecer automáticamente con sugerencias del glosario
+            if (MasterGlossary.Count == 0)
+            {
+                MasterGlossary = await IntelligentService.GetGlossaryItemsAsync(Connection, SelectedDatabase);
+            }
+            IntelligentService.EnrichWithSuggestions(metadata, MasterGlossary);
+
+            // Cargar historial formal de campos deprecados / eliminados
+            metadata.DeprecatedFields = await DriftService.GetDeprecatedFieldsAsync(Connection, SelectedDatabase);
+
+            // Cargar historial de modificaciones estructurales y control de versiones
+            metadata.VersionHistory = await DriftService.GetAllVersionHistoryAsync(Connection, SelectedDatabase);
+
+            // Fase 2: Compilación OpenXML con Streaming de Archivo Temporal
+            ProgressPhase = "Fase 2/3: Compilando Documento Word OpenXML";
+            ProgressDetail = $"Estructurando {metadata.TotalColumns} columnas, relaciones PK/FK, historial de eliminaciones y jerarquía visual...";
+            ProgressPercent = 70;
+            StateHasChanged();
+            await Task.Delay(50);
+
+            string tempFile = WordService.GenerateDocumentToTempFile(metadata, Customization);
+            var fileInfo = new FileInfo(tempFile);
+
+            // Fase 3: Streaming HTTP de Alta Velocidad
+            ProgressPhase = "Fase 3/3: Transfiriendo Archivo al Navegador";
+            ProgressDetail = $"Iniciando descarga HTTP ({fileInfo.Length / 1024.0:F1} KB)...";
+            ProgressPercent = 95;
+            StateHasChanged();
+            await Task.Delay(50);
+
+            string downloadFileName = $"Diccionario_Datos_{SelectedDatabase}_{DateTime.Now:yyyyMMdd_HHmmss}.docx";
+            string token = DownloadManager.RegisterTempFile(tempFile, downloadFileName);
+
+            // Disparar descarga directa nativa mediante la URL del endpoint
+            await JS.InvokeVoidAsync("downloadFileFromUrl", $"/api/download/{token}");
+
+            sw.Stop();
+            ProgressPercent = 100;
+            SuccessMessage = $"¡Diccionario generado con éxito! Archivo: '{downloadFileName}' ({fileInfo.Length / 1024.0:F1} KB, {metadata.TotalColumns} columnas y {metadata.DeprecatedFields.Count} campos eliminados documentados en {sw.ElapsedMilliseconds} ms).";
+        }
+        catch (Exception ex)
+        {
+            ErrorMessage = $"Error en la generación del documento: {ex.Message}";
+        }
+        finally
+        {
+            IsGenerating = false;
+        }
+    }
+}

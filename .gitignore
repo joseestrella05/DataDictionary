@@ -1,0 +1,40 @@
+## .NET / C# ##
+bin/
+obj/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+.vs/
+.vscode/
+*.nupkg
+*.snupkg
+project.lock.json
+project.fragment.lock.json
+artifacts/
+
+## ASP.NET / Blazor ##
+**/wwwroot/dist/
+**/wwwroot/.dist/
+
+## Secrets ##
+appsettings.*.json
+!appsettings.json
+secrets.json
+
+## OS ##
+Thumbs.db
+.DS_Store
+
+## Logs ##
+*.log
+logs/
+
+## Generated Word docs ##
+*.docx
+
+## Rider / JetBrains ##
+.idea/
+
+## NuGet packages (already in csproj) ##
+packages/
