@@ -93,9 +93,10 @@ namespace DataDictionaryWeb.Models
 
     public class CustomizationModel
     {
+        public string CompanyName { get; set; } = "Nordestana de Préstamos S. A.";
         public string InstitutionTitle { get; set; } = "Departamento de Tecnología de la Información";
-        public string DocumentTitle { get; set; } = "Diccionario de Datos";
-        public string PrimaryColorHex { get; set; } = "#1B365D";
+        public string DocumentTitle { get; set; } = "Diccionario de Datos de la Base de Datos";
+        public string PrimaryColorHex { get; set; } = "#D9EAD3";
         public byte[]? LogoBytes { get; set; }
         public string? LogoFileName { get; set; }
         public string? LogoContentType { get; set; }
@@ -174,11 +175,10 @@ namespace DataDictionaryWeb.Models
             get
             {
                 var desc = string.IsNullOrWhiteSpace(EditableDescription) ? "Sin descripción disponible" : EditableDescription.Trim();
-                if (!string.IsNullOrWhiteSpace(ForeignKeyReference) && !desc.Contains("[Referencia:") && !desc.Contains(ForeignKeyReference))
+                if (!string.IsNullOrWhiteSpace(ForeignKeyReference) && !desc.Contains("[Referencia:") && !desc.Contains(ForeignKeyReference) && !desc.Contains("hace referencia"))
                 {
                     desc += $" [Referencia: {ForeignKeyReference}]";
                 }
-                desc += IsNullable ? " (Permite NULL)" : " (NOT NULL)";
                 return desc;
             }
         }
@@ -286,5 +286,24 @@ namespace DataDictionaryWeb.Models
         public string? ModificadoPor { get; set; }
         public DateTime? FechaModificacion { get; set; }
         public int VersionActual { get; set; } = 1;
+    }
+
+    public class MasterCatalogTableEntry
+    {
+        public int Index { get; set; }
+        public string Schema { get; set; } = string.Empty;
+        public string TableName { get; set; } = string.Empty;
+        public string Description { get; set; } = string.Empty;
+        public string Observaciones { get; set; } = string.Empty;
+        public int ColumnCount { get; set; }
+        public List<MasterCatalogColumnEntry> Columns { get; set; } = new();
+    }
+
+    public class MasterCatalogColumnEntry
+    {
+        public string Campo { get; set; } = string.Empty;
+        public string Tipo { get; set; } = string.Empty;
+        public string Long { get; set; } = string.Empty;
+        public string Descripcion { get; set; } = string.Empty;
     }
 }

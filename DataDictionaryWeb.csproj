@@ -12,4 +12,10 @@
     <PackageReference Include="Microsoft.Data.SqlClient" Version="7.1.0" />
   </ItemGroup>
 
+  <ItemGroup>
+    <None Update="Catalogo_Maestro_CF01.json">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+  </ItemGroup>
+
 </Project>

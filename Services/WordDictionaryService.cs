@@ -15,17 +15,18 @@ namespace DataDictionaryWeb.Services
     public class WordDictionaryService
     {
         private const string PrimaryFont = "Segoe UI";
-        private const string CorporateSlate = "4A5568";
+        private const string HeaderBgGreen = "D9EAD3";
         private const string BorderColor = "D0D7DE";
+        private const string TextDark = "000000";
+        private const string CorporateSlate = "475569";
         private const string ZebraBackground = "F8FAFC";
-        private const string TextDark = "1E293B";
 
-        // Anchos de columna proporcionales en dxa (Total: 9360 dxa)
-        // Campo: 22% (2060) | Tipo: 15% (1404) | Long: 10% (936) | Descripción: 53% (4960)
-        private const int ColWidthCampo = 2060;
-        private const int ColWidthTipo = 1404;
-        private const int ColWidthLong = 936;
-        private const int ColWidthDesc = 4960;
+        // Anchos de columna exactos de Diccionario_de_datos.docx en dxa (Total: 9430 dxa)
+        // Campo: 2322 dxa | Tipo: 1241 dxa | Long: 709 dxa | Descripción: 5158 dxa
+        private const int ColWidthCampo = 2322;
+        private const int ColWidthTipo = 1241;
+        private const int ColWidthLong = 709;
+        private const int ColWidthDesc = 5158;
 
         /// <summary>
         /// Genera el documento Word directamente a un archivo temporal en disco usando FileStream.
@@ -111,7 +112,7 @@ namespace DataDictionaryWeb.Services
         private void AddCoverSection(Body body, MainDocumentPart mainPart, DatabaseDictionary data, CustomizationModel customization, string primaryColor)
         {
             // Espaciador superior
-            body.Append(new Paragraph(new ParagraphProperties(new SpacingBetweenLines { After = "180" })));
+            body.Append(new Paragraph(new ParagraphProperties(new SpacingBetweenLines { After = "120" })));
 
             // Logotipo si fue cargado
             if (customization.LogoBytes != null && customization.LogoBytes.Length > 0)
@@ -137,105 +138,77 @@ namespace DataDictionaryWeb.Services
                 }
             }
 
-            // Título Institucional
-            string inst = string.IsNullOrWhiteSpace(customization.InstitutionTitle)
-                ? "DEPARTAMENTO DE TECNOLOGÍA DE LA INFORMACIÓN"
-                : customization.InstitutionTitle.ToUpperInvariant();
+            // 1. Nombre de la Empresa (Centrado, 16pt / 32 sz, Negrita)
+            string company = string.IsNullOrWhiteSpace(customization.CompanyName)
+                ? "Nordestana de Préstamos S. A."
+                : customization.CompanyName.Trim();
 
             body.Append(new Paragraph(
                 new ParagraphProperties(
-                    new SpacingBetweenLines { After = "100", Line = "240" },
-                    new Justification { Val = JustificationValues.Left }
+                    new SpacingBetweenLines { Before = "60", After = "60", Line = "280" },
+                    new Justification { Val = JustificationValues.Center }
                 ),
                 new Run(
                     new RunProperties(
                         new RunFonts { Ascii = PrimaryFont, HighAnsi = PrimaryFont },
                         new Bold(),
-                        new Color { Val = CorporateSlate },
-                        new FontSize { Val = "22" }
+                        new Color { Val = TextDark },
+                        new FontSize { Val = "32" } // 16pt
+                    ),
+                    new Text(company)
+                )
+            ));
+
+            // 2. Departamento (Centrado, 13pt / 26 sz)
+            string inst = string.IsNullOrWhiteSpace(customization.InstitutionTitle)
+                ? "Departamento de Tecnología de la Información"
+                : customization.InstitutionTitle.Trim();
+
+            body.Append(new Paragraph(
+                new ParagraphProperties(
+                    new SpacingBetweenLines { Before = "40", After = "60", Line = "260" },
+                    new Justification { Val = JustificationValues.Center }
+                ),
+                new Run(
+                    new RunProperties(
+                        new RunFonts { Ascii = PrimaryFont, HighAnsi = PrimaryFont },
+                        new Color { Val = TextDark },
+                        new FontSize { Val = "26" } // 13pt
                     ),
                     new Text(inst)
                 )
             ));
 
-            // Título Principal
-            string title = string.IsNullOrWhiteSpace(customization.DocumentTitle)
-                ? $"Diccionario de Datos de la Base de Datos {data.DatabaseName}"
-                : customization.DocumentTitle;
+            // 3. Título del Documento con Nombre de la Base de Datos (Centrado, 14pt / 28 sz, Negrita)
+            string rawDocTitle = string.IsNullOrWhiteSpace(customization.DocumentTitle)
+                ? "Diccionario de Datos de la Base de Datos"
+                : customization.DocumentTitle.Trim().TrimEnd('.');
+
+            string dbName = data.DatabaseName?.Trim() ?? "";
+            string dbTitle;
+            if (!string.IsNullOrWhiteSpace(dbName) && !rawDocTitle.Contains(dbName, StringComparison.OrdinalIgnoreCase))
+            {
+                dbTitle = $"{rawDocTitle} {dbName}.";
+            }
+            else
+            {
+                dbTitle = $"{rawDocTitle}.";
+            }
 
             body.Append(new Paragraph(
                 new ParagraphProperties(
-                    new SpacingBetweenLines { Before = "60", After = "240", Line = "280" },
-                    new Justification { Val = JustificationValues.Left }
+                    new SpacingBetweenLines { Before = "40", After = "360", Line = "280" },
+                    new Justification { Val = JustificationValues.Center }
                 ),
                 new Run(
                     new RunProperties(
                         new RunFonts { Ascii = PrimaryFont, HighAnsi = PrimaryFont },
                         new Bold(),
-                        new Color { Val = primaryColor },
-                        new FontSize { Val = "42" } // 21pt
+                        new Color { Val = TextDark },
+                        new FontSize { Val = "28" } // 14pt
                     ),
-                    new Text(title)
+                    new Text(dbTitle)
                 )
-            ));
-
-            // Barra decorativa con color primario
-            var dividerTable = new Table(
-                new TableProperties(
-                    new TableWidth { Type = TableWidthUnitValues.Dxa, Width = "9360" },
-                    new TableBorders(
-                        new BottomBorder { Val = BorderValues.Single, Size = 12, Color = primaryColor }
-                    )
-                ),
-                new TableGrid(new GridColumn { Width = "9360" }),
-                new TableRow(
-                    new TableCell(
-                        new TableCellProperties(new TableCellWidth { Type = TableWidthUnitValues.Dxa, Width = "9360" }),
-                        new Paragraph(new ParagraphProperties(new SpacingBetweenLines { After = "0", Line = "60" }))
-                    )
-                )
-            );
-            body.Append(dividerTable);
-
-            body.Append(new Paragraph(new ParagraphProperties(new SpacingBetweenLines { After = "240" })));
-
-            // Tarjeta de Metadatos
-            var metadataTable = new Table(
-                new TableProperties(
-                    new TableWidth { Type = TableWidthUnitValues.Dxa, Width = "9360" },
-                    new TableBorders(
-                        new TopBorder { Val = BorderValues.Single, Size = 4, Color = BorderColor },
-                        new LeftBorder { Val = BorderValues.Single, Size = 4, Color = BorderColor },
-                        new BottomBorder { Val = BorderValues.Single, Size = 4, Color = BorderColor },
-                        new RightBorder { Val = BorderValues.Single, Size = 4, Color = BorderColor },
-                        new InsideHorizontalBorder { Val = BorderValues.Single, Size = 4, Color = BorderColor },
-                        new InsideVerticalBorder { Val = BorderValues.None }
-                    ),
-                    new TableCellMarginDefault(
-                        new TopMargin { Width = "120", Type = TableWidthUnitValues.Dxa },
-                        new TableCellLeftMargin { Width = 180, Type = TableWidthValues.Dxa },
-                        new BottomMargin { Width = "120", Type = TableWidthUnitValues.Dxa },
-                        new TableCellRightMargin { Width = 180, Type = TableWidthValues.Dxa }
-                    )
-                ),
-                new TableGrid(
-                    new GridColumn { Width = "3200" },
-                    new GridColumn { Width = "6160" }
-                )
-            );
-
-            AddSummaryRow(metadataTable, "Servidor de Base de Datos:", data.ServerName, primaryColor);
-            AddSummaryRow(metadataTable, "Base de Datos:", data.DatabaseName, primaryColor);
-            AddSummaryRow(metadataTable, "Fecha y Hora de Generación:", data.GeneratedAt.ToString("yyyy-MM-dd HH:mm:ss"), primaryColor);
-            AddSummaryRow(metadataTable, "Total de Esquemas:", data.Schemas.Count.ToString(), primaryColor);
-            AddSummaryRow(metadataTable, "Total de Tablas Documentadas:", data.TotalTables.ToString(), primaryColor);
-            AddSummaryRow(metadataTable, "Total de Atributos / Columnas:", data.TotalColumns.ToString(), primaryColor);
-
-            body.Append(metadataTable);
-
-            // Salto de página para el cuerpo
-            body.Append(new Paragraph(
-                new Run(new Break { Type = BreakValues.Page })
             ));
         }
 
@@ -283,7 +256,8 @@ namespace DataDictionaryWeb.Services
         {
             var paraProps = new ParagraphProperties(
                 new KeepNext(),
-                new SpacingBetweenLines { Before = isFirst ? "120" : "360", After = "140", Line = "280" }
+                new Justification { Val = JustificationValues.Center },
+                new SpacingBetweenLines { Before = isFirst ? "180" : "360", After = "180", Line = "280" }
             );
 
             var para = new Paragraph(
@@ -292,10 +266,10 @@ namespace DataDictionaryWeb.Services
                     new RunProperties(
                         new RunFonts { Ascii = PrimaryFont, HighAnsi = PrimaryFont },
                         new Bold(),
-                        new Color { Val = primaryColor },
-                        new FontSize { Val = "30" } // 15pt
+                        new Color { Val = TextDark },
+                        new FontSize { Val = "44" } // 22pt matching reference docx
                     ),
-                    new Text($"MÓDULO / ESQUEMA: {schemaName.ToUpperInvariant()}")
+                    new Text(schemaName.ToUpperInvariant())
                 )
             );
 
@@ -316,7 +290,7 @@ namespace DataDictionaryWeb.Services
                         new RunFonts { Ascii = PrimaryFont, HighAnsi = PrimaryFont },
                         new Bold(),
                         new Color { Val = TextDark },
-                        new FontSize { Val = "23" } // 11.5pt
+                        new FontSize { Val = "24" } // 12pt
                     ),
                     new Text($"{schemaName}.{tableName}:")
                 )
@@ -325,32 +299,39 @@ namespace DataDictionaryWeb.Services
             body.Append(para);
         }
 
-        private void AddTableDescription(Body body, string description, string primaryColor)
+        private void AddTableDescription(Body body, string description, string? primaryColor = null)
         {
             var paraProps = new ParagraphProperties(
                 new KeepNext(),
-                new SpacingBetweenLines { Before = "0", After = "120", Line = "240" }
+                new SpacingBetweenLines { Before = "0", After = "120", Line = "240" },
+                new Justification { Val = JustificationValues.Both }
             );
 
             var para = new Paragraph(paraProps);
+
+            string cleanDesc = description?.Trim() ?? "Sin descripción registrada.";
+            if (cleanDesc.StartsWith("Descripción:", StringComparison.OrdinalIgnoreCase))
+            {
+                cleanDesc = cleanDesc.Substring("Descripción:".Length).Trim();
+            }
 
             para.Append(new Run(
                 new RunProperties(
                     new RunFonts { Ascii = PrimaryFont, HighAnsi = PrimaryFont },
                     new Bold(),
-                    new Color { Val = primaryColor },
-                    new FontSize { Val = "19" }
+                    new Color { Val = TextDark },
+                    new FontSize { Val = "24" } // 12pt
                 ),
-                new Text("Descripción: ")
+                new Text("Descripción: ") { Space = SpaceProcessingModeValues.Preserve }
             ));
 
             para.Append(new Run(
                 new RunProperties(
                     new RunFonts { Ascii = PrimaryFont, HighAnsi = PrimaryFont },
-                    new Color { Val = CorporateSlate },
-                    new FontSize { Val = "19" }
+                    new Color { Val = TextDark },
+                    new FontSize { Val = "24" } // 12pt
                 ),
-                new Text(description)
+                new Text(cleanDesc)
             ));
 
             body.Append(para);
@@ -360,20 +341,22 @@ namespace DataDictionaryWeb.Services
         {
             var table = new Table(
                 new TableProperties(
-                    new TableWidth { Type = TableWidthUnitValues.Dxa, Width = "9360" },
+                    new TableJustification { Val = TableRowAlignmentValues.Center },
+                    new TableLayout { Type = TableLayoutValues.Fixed },
+                    new TableWidth { Type = TableWidthUnitValues.Dxa, Width = "9430" },
                     new TableBorders(
-                        new TopBorder { Val = BorderValues.Single, Size = 6, Color = BorderColor },
-                        new LeftBorder { Val = BorderValues.Single, Size = 4, Color = BorderColor },
-                        new BottomBorder { Val = BorderValues.Single, Size = 6, Color = BorderColor },
-                        new RightBorder { Val = BorderValues.Single, Size = 4, Color = BorderColor },
-                        new InsideHorizontalBorder { Val = BorderValues.Single, Size = 4, Color = BorderColor },
-                        new InsideVerticalBorder { Val = BorderValues.Single, Size = 4, Color = BorderColor }
+                        new TopBorder { Val = BorderValues.Single, Size = 4, Color = "000000" },
+                        new LeftBorder { Val = BorderValues.Single, Size = 4, Color = "000000" },
+                        new BottomBorder { Val = BorderValues.Single, Size = 4, Color = "000000" },
+                        new RightBorder { Val = BorderValues.Single, Size = 4, Color = "000000" },
+                        new InsideHorizontalBorder { Val = BorderValues.Single, Size = 4, Color = "000000" },
+                        new InsideVerticalBorder { Val = BorderValues.Single, Size = 4, Color = "000000" }
                     ),
                     new TableCellMarginDefault(
-                        new TopMargin { Width = "100", Type = TableWidthUnitValues.Dxa },
-                        new TableCellLeftMargin { Width = 140, Type = TableWidthValues.Dxa },
-                        new BottomMargin { Width = "100", Type = TableWidthUnitValues.Dxa },
-                        new TableCellRightMargin { Width = 140, Type = TableWidthValues.Dxa }
+                        new TopMargin { Width = "120", Type = TableWidthUnitValues.Dxa },
+                        new TableCellLeftMargin { Width = 120, Type = TableWidthValues.Dxa },
+                        new BottomMargin { Width = "120", Type = TableWidthUnitValues.Dxa },
+                        new TableCellRightMargin { Width = 120, Type = TableWidthValues.Dxa }
                     )
                 ),
                 new TableGrid(
@@ -384,47 +367,107 @@ namespace DataDictionaryWeb.Services
                 )
             );
 
-            // Fila de encabezado (Campo 22%, Tipo 15%, Long 10%, Descripción 53%)
-            string headerBg = "EBF2F7";
-            var headerRow = new TableRow(
+            // Fila 1 de encabezado repetible: Nombre de la Tabla (garantiza que en saltos de página nunca quede sin título)
+            var tableNameRow = new TableRow(
                 new TableRowProperties(
+                    new TableRowHeight { Val = 380 },
+                    new TableJustification { Val = TableRowAlignmentValues.Center },
                     new TableHeader(),
                     new CantSplit()
                 ),
-                CreateHeaderCell("Campo", ColWidthCampo, JustificationValues.Left, headerBg, primaryColor),
-                CreateHeaderCell("Tipo", ColWidthTipo, JustificationValues.Left, headerBg, primaryColor),
-                CreateHeaderCell("Long", ColWidthLong, JustificationValues.Center, headerBg, primaryColor),
-                CreateHeaderCell("Descripción", ColWidthDesc, JustificationValues.Left, headerBg, primaryColor)
+                CreateFullWidthHeaderCell($"Tabla: {tableMeta.SchemaName}.{tableMeta.TableName}", 9430, 4)
+            );
+            table.Append(tableNameRow);
+
+            // Fila 2 de encabezado repetible con fondo HeaderBgGreen ("D9EAD3"), centrada, texto negro negrita 12pt
+            var headerRow = new TableRow(
+                new TableRowProperties(
+                    new TableRowHeight { Val = 361 },
+                    new TableJustification { Val = TableRowAlignmentValues.Center },
+                    new TableHeader(),
+                    new CantSplit()
+                ),
+                CreateHeaderCell("Campo", ColWidthCampo),
+                CreateHeaderCell("Tipo ", ColWidthTipo),
+                CreateHeaderCell("Long", ColWidthLong),
+                CreateHeaderCell("Descripción ", ColWidthDesc)
             );
             table.Append(headerRow);
 
             // Filas de datos
-            int rowIndex = 0;
             foreach (var col in tableMeta.Columns)
             {
-                string rowBg = (rowIndex % 2 == 1) ? ZebraBackground : "FFFFFF";
+                string displayType = (col.DataType ?? "").ToUpperInvariant();
 
                 var dataRow = new TableRow(
-                    new TableRowProperties(new CantSplit()),
-                    CreateDataCell(col.DisplayName, ColWidthCampo, JustificationValues.Left, rowBg, isBold: col.IsPrimaryKey, textColor: col.IsPrimaryKey ? primaryColor : TextDark),
-                    CreateDataCell(col.DisplayDataType, ColWidthTipo, JustificationValues.Left, rowBg, isBold: false, textColor: CorporateSlate),
-                    CreateDataCell(col.Length, ColWidthLong, JustificationValues.Center, rowBg, isBold: false, textColor: CorporateSlate),
-                    CreateDataCell(col.FullDescription, ColWidthDesc, JustificationValues.Both, rowBg, isBold: false, textColor: TextDark)
+                    new TableRowProperties(
+                        new TableJustification { Val = TableRowAlignmentValues.Center },
+                        new CantSplit()
+                    ),
+                    CreateDataCell(col.Name, ColWidthCampo, JustificationValues.Left, isBold: false),
+                    CreateDataCell(displayType, ColWidthTipo, JustificationValues.Center, isBold: false),
+                    CreateDataCell(col.Length, ColWidthLong, JustificationValues.Center, isBold: false),
+                    CreateDataCell(col.FullDescription, ColWidthDesc, JustificationValues.Both, isBold: false)
                 );
 
                 table.Append(dataRow);
-                rowIndex++;
             }
 
             body.Append(table);
         }
 
-        private TableCell CreateHeaderCell(string text, int widthDxa, JustificationValues align, string bgColor, string primaryColor)
+        private TableCell CreateFullWidthHeaderCell(string text, int widthDxa, int gridSpan)
         {
             return new TableCell(
                 new TableCellProperties(
                     new TableCellWidth { Type = TableWidthUnitValues.Dxa, Width = widthDxa.ToString() },
-                    new Shading { Val = ShadingPatternValues.Clear, Fill = bgColor }
+                    new GridSpan { Val = gridSpan },
+                    new Shading { Val = ShadingPatternValues.Clear, Fill = HeaderBgGreen },
+                    new TableCellMargin(
+                        new TopMargin { Width = "120", Type = TableWidthUnitValues.Dxa },
+                        new LeftMargin { Width = "140", Type = TableWidthUnitValues.Dxa },
+                        new BottomMargin { Width = "120", Type = TableWidthUnitValues.Dxa },
+                        new RightMargin { Width = "140", Type = TableWidthUnitValues.Dxa }
+                    ),
+                    new TableCellVerticalAlignment { Val = TableVerticalAlignmentValues.Center }
+                ),
+                new Paragraph(
+                    new ParagraphProperties(
+                        new KeepNext(),
+                        new SpacingBetweenLines { Before = "40", After = "40", Line = "220" },
+                        new Justification { Val = JustificationValues.Left }
+                    ),
+                    new Run(
+                        new RunProperties(
+                            new RunFonts { Ascii = PrimaryFont, HighAnsi = PrimaryFont },
+                            new Bold(),
+                            new Color { Val = TextDark },
+                            new FontSize { Val = "24" } // 12pt
+                        ),
+                        new Text(text) { Space = SpaceProcessingModeValues.Preserve }
+                    )
+                )
+            );
+        }
+
+        private TableCell CreateHeaderCell(string text, int widthDxa)
+        {
+            return CreateHeaderCell(text, widthDxa, JustificationValues.Center, HeaderBgGreen, TextDark);
+        }
+
+        private TableCell CreateHeaderCell(string text, int widthDxa, JustificationValues align, string bgColor, string textColor)
+        {
+            return new TableCell(
+                new TableCellProperties(
+                    new TableCellWidth { Type = TableWidthUnitValues.Dxa, Width = widthDxa.ToString() },
+                    new Shading { Val = ShadingPatternValues.Clear, Fill = bgColor },
+                    new TableCellMargin(
+                        new TopMargin { Width = "120", Type = TableWidthUnitValues.Dxa },
+                        new LeftMargin { Width = "120", Type = TableWidthUnitValues.Dxa },
+                        new BottomMargin { Width = "120", Type = TableWidthUnitValues.Dxa },
+                        new RightMargin { Width = "120", Type = TableWidthUnitValues.Dxa }
+                    ),
+                    new TableCellVerticalAlignment { Val = TableVerticalAlignmentValues.Center }
                 ),
                 new Paragraph(
                     new ParagraphProperties(
@@ -436,19 +479,31 @@ namespace DataDictionaryWeb.Services
                         new RunProperties(
                             new RunFonts { Ascii = PrimaryFont, HighAnsi = PrimaryFont },
                             new Bold(),
-                            new Color { Val = primaryColor },
-                            new FontSize { Val = "19" }
+                            new Color { Val = textColor },
+                            new FontSize { Val = "24" } // 12pt
                         ),
-                        new Text(text)
+                        new Text(text) { Space = SpaceProcessingModeValues.Preserve }
                     )
                 )
             );
         }
 
+        private TableCell CreateDataCell(string text, int widthDxa, JustificationValues align, bool isBold)
+        {
+            return CreateDataCell(text, widthDxa, align, "FFFFFF", isBold, TextDark);
+        }
+
         private TableCell CreateDataCell(string text, int widthDxa, JustificationValues align, string bgColor, bool isBold, string textColor)
         {
             var cellProps = new TableCellProperties(
-                new TableCellWidth { Type = TableWidthUnitValues.Dxa, Width = widthDxa.ToString() }
+                new TableCellWidth { Type = TableWidthUnitValues.Dxa, Width = widthDxa.ToString() },
+                new TableCellMargin(
+                    new TopMargin { Width = "120", Type = TableWidthUnitValues.Dxa },
+                    new LeftMargin { Width = "120", Type = TableWidthUnitValues.Dxa },
+                    new BottomMargin { Width = "120", Type = TableWidthUnitValues.Dxa },
+                    new RightMargin { Width = "120", Type = TableWidthUnitValues.Dxa }
+                ),
+                new TableCellVerticalAlignment { Val = TableVerticalAlignmentValues.Center }
             );
 
             if (!string.IsNullOrEmpty(bgColor) && bgColor != "FFFFFF")
@@ -457,7 +512,9 @@ namespace DataDictionaryWeb.Services
             }
 
             var runProps = new RunProperties(
-                new RunFonts { Ascii = PrimaryFont, HighAnsi = PrimaryFont }
+                new RunFonts { Ascii = PrimaryFont, HighAnsi = PrimaryFont },
+                new Color { Val = textColor },
+                new FontSize { Val = "24" } // 12pt
             );
 
             if (isBold)
@@ -465,19 +522,34 @@ namespace DataDictionaryWeb.Services
                 runProps.Append(new Bold());
             }
 
-            runProps.Append(new Color { Val = textColor });
-            runProps.Append(new FontSize { Val = "18" });
+            var cell = new TableCell(cellProps);
 
-            return new TableCell(
-                cellProps,
-                new Paragraph(
+            if (string.IsNullOrEmpty(text))
+            {
+                cell.Append(new Paragraph(
                     new ParagraphProperties(
-                        new SpacingBetweenLines { Before = "30", After = "30", Line = "210" },
+                        new SpacingBetweenLines { Before = "30", After = "30", Line = "240" },
                         new Justification { Val = align }
                     ),
-                    new Run(runProps, new Text(text))
-                )
-            );
+                    new Run(runProps, new Text(""))
+                ));
+            }
+            else
+            {
+                var lines = text.Replace("\r\n", "\n").Split('\n');
+                foreach (var line in lines)
+                {
+                    cell.Append(new Paragraph(
+                        new ParagraphProperties(
+                            new SpacingBetweenLines { Before = "20", After = "20", Line = "240" },
+                            new Justification { Val = align }
+                        ),
+                        new Run((RunProperties)runProps.CloneNode(true), new Text(line) { Space = SpaceProcessingModeValues.Preserve })
+                    ));
+                }
+            }
+
+            return cell;
         }
 
         private Paragraph CreateImageParagraph(string relationshipId, double widthMm, double heightMm)

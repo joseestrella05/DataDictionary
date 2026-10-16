@@ -2273,6 +2273,36 @@
             }
             IntelligentService.EnrichWithSuggestions(metadata, MasterGlossary);
 
+            // Si el usuario editó descripciones en el Asistente de Metadatos, propagar sus cambios
+            if (AuditDictionary != null)
+            {
+                foreach (var aSchema in AuditDictionary.Schemas)
+                {
+                    var mSchema = metadata.Schemas.FirstOrDefault(s => s.SchemaName.Equals(aSchema.SchemaName, StringComparison.OrdinalIgnoreCase));
+                    if (mSchema == null) continue;
+
+                    foreach (var aTable in aSchema.Tables)
+                    {
+                        var mTable = mSchema.Tables.FirstOrDefault(t => t.TableName.Equals(aTable.TableName, StringComparison.OrdinalIgnoreCase));
+                        if (mTable == null) continue;
+
+                        if (!string.IsNullOrWhiteSpace(aTable.EditableDescription))
+                        {
+                            mTable.EditableDescription = aTable.EditableDescription;
+                        }
+
+                        foreach (var aCol in aTable.Columns)
+                        {
+                            var mCol = mTable.Columns.FirstOrDefault(c => c.Name.Equals(aCol.Name, StringComparison.OrdinalIgnoreCase));
+                            if (mCol != null && !string.IsNullOrWhiteSpace(aCol.EditableDescription))
+                            {
+                                mCol.EditableDescription = aCol.EditableDescription;
+                            }
+                        }
+                    }
+                }
+            }
+
             // Cargar historial formal de campos deprecados / eliminados
             metadata.DeprecatedFields = await DriftService.GetDeprecatedFieldsAsync(Connection, SelectedDatabase);
 
